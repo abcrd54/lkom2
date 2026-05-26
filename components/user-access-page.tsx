@@ -8,10 +8,11 @@ type UserAccessPageProps = {
   user: {
     id: string;
     name: string;
-    provider: MailProvider;
+    provider: MailProvider | null;
+    hasInbox: boolean;
     inboxAddress: string;
     status: "active" | "disabled";
-    inboxStatus: string;
+    inboxStatus: string | null;
   } | null;
   messages: Array<{
     id: string;
@@ -47,7 +48,8 @@ type UserAccessApiPayload =
         user: {
           id: string;
           name: string;
-          provider: MailProvider;
+          provider: MailProvider | null;
+          hasInbox: boolean;
           inboxAddress: string;
         };
         items: Array<{
@@ -84,7 +86,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
   }, [messages]);
 
   useEffect(() => {
-    if (!user || user.status !== "active" || user.inboxStatus === "disabled") {
+    if (!user || user.status !== "active" || !user.hasInbox || user.inboxStatus === "disabled") {
       return;
     }
 
@@ -246,7 +248,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
     }
   }
 
-  if (!user || user.status !== "active" || user.inboxStatus === "disabled") {
+  if (!user || user.status !== "active") {
     return (
       <section className="user-access-shell">
         <div className="user-access-card user-access-empty">
@@ -266,11 +268,17 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
         <div>
           <span className="user-access-kicker">OTP Access</span>
           <h1 className="user-access-title">{user.name}</h1>
-          <p className="user-access-copy">
-            OTP feed for <strong>{user.inboxAddress}</strong> via{" "}
-            <strong>{providerLabel(user.provider)}</strong>.
-          </p>
-          <p className="user-access-status">{formatUpdatedAgo()}</p>
+          {user.hasInbox ? (
+            <>
+              <p className="user-access-copy">
+                OTP feed for <strong>{user.inboxAddress}</strong> via{" "}
+                <strong>{user.provider ? providerLabel(user.provider) : "-"}</strong>.
+              </p>
+              <p className="user-access-status">{formatUpdatedAgo()}</p>
+            </>
+          ) : (
+            <p className="user-access-copy">This account is redeem-only and does not have an OTP inbox.</p>
+          )}
         </div>
       </div>
 
@@ -278,38 +286,40 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
         <div className="user-access-section-head">
           <div>
             <h2>Latest OTP</h2>
-            <p>Recent codes received for this email.</p>
+            <p>{user.hasInbox ? "Recent codes received for this email." : "No inbox connected for this account."}</p>
           </div>
-          <div className="user-access-actions">
-            <div className="user-summary-card user-summary-card-email">
-              <div className="user-summary-card-head">
-                <span className="user-summary-label">Email</span>
-                <button
-                  aria-label={copiedEmail ? "Email copied" : "Copy email"}
-                  className="user-copy-icon-button"
-                  onClick={handleCopyEmail}
-                  type="button"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M9 9.75C9 8.50736 10.0074 7.5 11.25 7.5H18C19.2426 7.5 20.25 8.50736 20.25 9.75V18C20.25 19.2426 19.2426 20.25 18 20.25H11.25C10.0074 20.25 9 19.2426 9 18V9.75Z"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                    />
-                    <path
-                      d="M5.25 15.75C4.00736 15.75 3 14.7426 3 13.5V5.25C3 4.00736 4.00736 3 5.25 3H13.5C14.7426 3 15.75 4.00736 15.75 5.25"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                    />
-                  </svg>
-                </button>
+          {user.hasInbox ? (
+            <div className="user-access-actions">
+              <div className="user-summary-card user-summary-card-email">
+                <div className="user-summary-card-head">
+                  <span className="user-summary-label">Email</span>
+                  <button
+                    aria-label={copiedEmail ? "Email copied" : "Copy email"}
+                    className="user-copy-icon-button"
+                    onClick={handleCopyEmail}
+                    type="button"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="M9 9.75C9 8.50736 10.0074 7.5 11.25 7.5H18C19.2426 7.5 20.25 8.50736 20.25 9.75V18C20.25 19.2426 19.2426 20.25 18 20.25H11.25C10.0074 20.25 9 19.2426 9 18V9.75Z"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                      <path
+                        d="M5.25 15.75C4.00736 15.75 3 14.7426 3 13.5V5.25C3 4.00736 4.00736 3 5.25 3H13.5C14.7426 3 15.75 4.00736 15.75 5.25"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <strong>{user.inboxAddress}</strong>
               </div>
-              <strong>{user.inboxAddress}</strong>
+              <button className="button secondary user-refresh-button" onClick={handleRefresh} type="button">
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
             </div>
-            <button className="button secondary user-refresh-button" onClick={handleRefresh} type="button">
-              {isRefreshing ? "Refreshing..." : "Refresh"}
-            </button>
-          </div>
+          ) : null}
         </div>
 
         <div className="user-otp-grid">
@@ -336,8 +346,12 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
             ))
           ) : (
             <article className="user-otp-card empty">
-              <h3>No OTP yet</h3>
-              <p className="user-access-copy">New messages will appear here after inbox sync runs.</p>
+              <h3>{user.hasInbox ? "No OTP yet" : "No inbox connected"}</h3>
+              <p className="user-access-copy">
+                {user.hasInbox
+                  ? "New messages will appear here after inbox sync runs."
+                  : "This user was created for redeem access only."}
+              </p>
             </article>
           )}
         </div>

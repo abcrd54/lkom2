@@ -38,13 +38,13 @@ type UserView = {
   name: string;
   phoneNumber: string;
   status: UserStatus;
-  mailAccountId: string;
-  subMailAccountId: string;
+  mailAccountId: string | null;
+  subMailAccountId: string | null;
   subMailAccountLabel: string;
-  provider: MailProvider;
+  provider: MailProvider | null;
   inboxAddress: string;
   sourceInboxAddress: string;
-  inboxStatus: string;
+  inboxStatus: string | null;
   linkDisabledAt: string | null;
   accessToken: string;
   createdAt: string;
@@ -186,6 +186,14 @@ function formatDateTime(value: string | null | undefined) {
 
 function providerLabel(provider: MailProvider) {
   return provider === "google" ? "Google" : "Microsoft";
+}
+
+function userProviderLabel(provider: MailProvider | null) {
+  if (!provider) {
+    return "Redeem";
+  }
+
+  return providerLabel(provider);
 }
 
 function buildAccessPath(token: string) {
@@ -694,19 +702,36 @@ function ManageUserSection({
   const [name, setName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [subMailAccountId, setSubMailAccountId] = useState("");
+  const [codeRedeem, setCodeRedeem] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdAccessLink, setCreatedAccessLink] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<
-    Array<{ name: string; phoneNumber: string; emailConnect: string }>
+    Array<{ name: string; phoneNumber: string; emailConnect: string; codeRedeem: string }>
   >([]);
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<{
     successCount: number;
+    partialCount: number;
     failedCount: number;
-    failed: Array<{ row: number; name: string; phoneNumber: string; emailConnect: string; reason: string }>;
+    partial: Array<{
+      row: number;
+      name: string;
+      phoneNumber: string;
+      emailConnect: string;
+      codeRedeem: string;
+      reason: string;
+    }>;
+    failed: Array<{
+      row: number;
+      name: string;
+      phoneNumber: string;
+      emailConnect: string;
+      codeRedeem: string;
+      reason: string;
+    }>;
   } | null>(null);
 
   const activeMailAccounts = mailAccounts.filter((account) => account.status !== "disabled");
@@ -716,12 +741,6 @@ function ManageUserSection({
       provider: account.provider,
       sourceInboxAddress: account.emailAddress
     }))
-  );
-  const subAccountIdByEmail = new Map(
-    selectableSubAccounts.map((subAccount) => [
-      subAccount.displayEmail.trim().toLowerCase(),
-      subAccount.id
-    ])
   );
   const [copiedAccessUserId, setCopiedAccessUserId] = useState<string | null>(null);
   const rowNumberOffset = users ? (users.page - 1) * 10 : 0;
@@ -743,6 +762,7 @@ function ManageUserSection({
     setName("");
     setPhoneNumber("");
     setSubMailAccountId("");
+    setCodeRedeem("");
     setErrorMessage(null);
     setSuccessMessage(null);
     setCreatedAccessLink(null);
@@ -789,7 +809,7 @@ function ManageUserSection({
   }
 
   function downloadTemplate() {
-    const csv = "name,phoneNumber,email_connect\n";
+    const csv = "name,phoneNumber,email_connect,code_redeem\n";
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -835,21 +855,28 @@ function ManageUserSection({
             normalizedEntries.inboxemail ??
             normalizedEntries.inbox ??
             normalizedEntries.email ??
+            "",
+          codeRedeem:
+            normalizedEntries.coderedeem ??
+            normalizedEntries.redeemcode ??
+            normalizedEntries.code ??
             ""
         };
       })
-      .filter((row) => row.name || row.phoneNumber || row.emailConnect);
+      .filter((row) => row.name || row.phoneNumber || row.emailConnect || row.codeRedeem);
 
     if (parsedRows.length === 0) {
       throw new Error("Import file is empty or template headers are invalid.");
     }
 
     const invalidRow = parsedRows.find(
-      (row) => !row.name || !row.phoneNumber || !row.emailConnect
+      (row) => !row.name || !row.phoneNumber || (!row.emailConnect && !row.codeRedeem)
     );
 
     if (invalidRow) {
-      throw new Error("Each import row must include name, phoneNumber, and email_connect.");
+      throw new Error(
+        "Each import row must include name, phoneNumber, and at least one of email_connect or code_redeem."
+      );
     }
 
     return parsedRows;
@@ -891,7 +918,8 @@ function ManageUserSection({
         body: JSON.stringify({
           name,
           phoneNumber,
-          subMailAccountId
+          subMailAccountId: subMailAccountId || null,
+          codeRedeem
         })
       });
 
@@ -917,6 +945,7 @@ function ManageUserSection({
       setName("");
       setPhoneNumber("");
       setSubMailAccountId("");
+      setCodeRedeem("");
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to create user.");
@@ -935,76 +964,55 @@ function ManageUserSection({
     setErrorMessage(null);
     setBulkResult(null);
 
-    const failed: Array<{
-      row: number;
-      name: string;
-      phoneNumber: string;
-      emailConnect: string;
-      reason: string;
-    }> = [];
-    let successCount = 0;
-
     try {
-      for (const [index, row] of bulkRows.entries()) {
-        setBulkProgress(`Importing ${index + 1} of ${bulkRows.length}...`);
-        const subMailAccountIdForRow = subAccountIdByEmail.get(row.emailConnect.trim().toLowerCase());
+      setBulkProgress(`Importing ${bulkRows.length} row(s)...`);
+      const response = await fetch("/api/users/bulk-import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ rows: bulkRows })
+      });
 
-        if (!subMailAccountIdForRow) {
-          failed.push({
-            row: index + 2,
-            name: row.name,
-            phoneNumber: row.phoneNumber,
-            emailConnect: row.emailConnect,
-            reason: `Sub account not found or disabled: ${row.emailConnect}`
-          });
-          continue;
-        }
-
-        try {
-          const response = await fetch("/api/users/create", {
-            method: "POST",
-            headers: {
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({
-              name: row.name,
-              phoneNumber: row.phoneNumber,
-              subMailAccountId: subMailAccountIdForRow
-            })
-          });
-
-          const payload = (await response.json()) as
-            | {
-                ok: true;
-              }
-            | {
-                ok: false;
-                error?: string;
-              };
-
-          if (!response.ok || !payload.ok) {
-            throw new Error(payload.ok ? "Failed to create user." : payload.error ?? "Failed to create user.");
+      const payload = (await response.json()) as
+        | {
+            ok: true;
+            data: {
+              successCount: number;
+              partialCount: number;
+              failedCount: number;
+              partial: Array<{
+                row: number;
+                name: string;
+                phoneNumber: string;
+                emailConnect: string;
+                codeRedeem: string;
+                reason: string;
+              }>;
+              failed: Array<{
+                row: number;
+                name: string;
+                phoneNumber: string;
+                emailConnect: string;
+                codeRedeem: string;
+                reason: string;
+              }>;
+            };
           }
+        | {
+            ok: false;
+            error?: string;
+          };
 
-          successCount += 1;
-        } catch (error) {
-          failed.push({
-            row: index + 2,
-            name: row.name,
-            phoneNumber: row.phoneNumber,
-            emailConnect: row.emailConnect,
-            reason: error instanceof Error ? error.message : "Failed to create user."
-          });
-        }
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? "Failed to import users." : payload.error ?? "Failed to import users.");
       }
 
-      setBulkResult({
-        successCount,
-        failedCount: failed.length,
-        failed
-      });
+      setBulkResult(payload.data);
       setBulkProgress(null);
       router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to import users.");
     } finally {
       setIsSubmitting(false);
     }
@@ -1012,11 +1020,11 @@ function ManageUserSection({
 
   return (
     <section className={cn("card", compact && "overview-card", fullWidth && "card-span-full")}>
-      <div className="card-header">
-        <div>
-          <h3>Manage User</h3>
-          <p>Create users and assign active sub accounts.</p>
-        </div>
+        <div className="card-header">
+          <div>
+            <h3>Manage User</h3>
+            <p>Create inbox users or standalone redeem-only users.</p>
+          </div>
         <div className="button-row">
           <button className="button" onClick={openSingleModal} type="button">
             Add User
@@ -1059,16 +1067,20 @@ function ManageUserSection({
                   <td>{rowNumberOffset + index + 1}</td>
                   <td>{user.name}</td>
                   <td>{user.phoneNumber}</td>
-                  <td>{providerLabel(user.provider)}</td>
+                  <td>{userProviderLabel(user.provider)}</td>
                   <td>
-                    <div className="log-recipient-list">
-                      <span>
-                        {user.subMailAccountLabel}: {user.inboxAddress}
-                      </span>
-                      {user.sourceInboxAddress !== user.inboxAddress ? (
-                        <span>Source inbox: {user.sourceInboxAddress}</span>
-                      ) : null}
-                    </div>
+                    {user.inboxAddress ? (
+                      <div className="log-recipient-list">
+                        <span>
+                          {user.subMailAccountLabel}: {user.inboxAddress}
+                        </span>
+                        {user.sourceInboxAddress && user.sourceInboxAddress !== user.inboxAddress ? (
+                          <span>Source inbox: {user.sourceInboxAddress}</span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="micro">Redeem only</span>
+                    )}
                   </td>
                   <td>
                     <span className={cn("badge", user.status === "active" ? "success" : "warning")}>
@@ -1125,7 +1137,7 @@ function ManageUserSection({
                 <h3>{modalMode === "single" ? "Add User" : "Bulk Import"}</h3>
                 <p>
                   {modalMode === "single"
-                    ? "Create one user and assign it to a dedicated sub account."
+                    ? "Create one inbox user or one standalone redeem-only user."
                     : "Upload CSV, XLS, or XLSX using the import template headers."}
                 </p>
               </div>
@@ -1165,10 +1177,9 @@ function ManageUserSection({
                     name="inbox"
                     value={subMailAccountId}
                     onChange={(event) => setSubMailAccountId(event.target.value)}
-                    required
                   >
-                    <option value="" disabled>
-                      Select active sub account
+                    <option value="">
+                      No sub account
                     </option>
                     {selectableSubAccounts.map((subAccount) => (
                       <option key={subAccount.id} value={subAccount.id}>
@@ -1178,6 +1189,20 @@ function ManageUserSection({
                     ))}
                   </select>
                 </div>
+                <div className="field">
+                  <label htmlFor="modal-code-redeem">Code redeem</label>
+                  <input
+                    id="modal-code-redeem"
+                    name="codeRedeem"
+                    placeholder="ABC123"
+                    value={codeRedeem}
+                    onChange={(event) => setCodeRedeem(event.target.value)}
+                  />
+                </div>
+                <p className="micro">
+                  Use sub account for OTP users. If no sub account is selected, `code_redeem` is
+                  required and the user becomes redeem-only.
+                </p>
                 {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
                 {successMessage ? (
                   <div className="form-feedback success-block">
@@ -1212,9 +1237,13 @@ function ManageUserSection({
                 </div>
                 <div className="import-template-note">
                   Template headers:
-                  <code>name,phoneNumber,email_connect</code>
+                  <code>name,phoneNumber,email_connect,code_redeem</code>
                 </div>
-                <p className="micro">Use `email_connect` from the Sub-Gmail display email list.</p>
+                <p className="micro">
+                  Use `email_connect` from the Sub-Gmail display email list. Leave it empty only
+                  when `code_redeem` should be assigned to an existing user matched by phone
+                  number.
+                </p>
                 {bulkFileName ? (
                   <p className="micro">
                     {bulkFileName} | {bulkRows.length} row(s) ready
@@ -1225,14 +1254,33 @@ function ManageUserSection({
                 {bulkResult ? (
                   <div className="form-feedback success-block">
                     <p className="success-title">
-                      {bulkResult.successCount} user(s) imported | {bulkResult.failedCount} failed
+                      {bulkResult.successCount} success | {bulkResult.partialCount} partial |{" "}
+                      {bulkResult.failedCount} failed
                     </p>
+                    {bulkResult.partial.length > 0 ? (
+                      <div className="bulk-failed-list">
+                        {bulkResult.partial.map((partialRow) => (
+                          <p
+                            className="micro"
+                            key={`partial-${partialRow.row}-${partialRow.phoneNumber}-${partialRow.reason}`}
+                          >
+                            Partial Row {partialRow.row} | {partialRow.name} |{" "}
+                            {partialRow.phoneNumber} | {partialRow.emailConnect || "-"} |{" "}
+                            {partialRow.codeRedeem || "-"}: {partialRow.reason}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                     {bulkResult.failed.length > 0 ? (
                       <div className="bulk-failed-list">
                         {bulkResult.failed.map((failedRow) => (
-                          <p className="micro" key={`${failedRow.row}-${failedRow.phoneNumber}-${failedRow.reason}`}>
+                          <p
+                            className="micro"
+                            key={`${failedRow.row}-${failedRow.phoneNumber}-${failedRow.reason}`}
+                          >
                             Row {failedRow.row} | {failedRow.name} | {failedRow.phoneNumber} |{" "}
-                            {failedRow.emailConnect}: {failedRow.reason}
+                            {failedRow.emailConnect || "-"} | {failedRow.codeRedeem || "-"}:{" "}
+                            {failedRow.reason}
                           </p>
                         ))}
                       </div>

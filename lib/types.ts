@@ -22,9 +22,9 @@ export type ManagedUser = {
   id: string;
   name: string;
   phoneNumber: string;
-  mailAccountId: string;
-  subMailAccountId: string;
-  provider: MailProvider;
+  mailAccountId: string | null;
+  subMailAccountId: string | null;
+  provider: MailProvider | null;
   inboxAddress: string;
   sourceInboxAddress?: string;
   status: UserStatus;

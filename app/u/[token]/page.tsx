@@ -13,7 +13,7 @@ export default async function UserAccessRoute({ params }: UserAccessRouteProps) 
   const { token } = await params;
   const user = await getUserByAccessToken(token);
   const messages =
-    user && user.status === "active" && user.inboxStatus !== "disabled"
+    user && user.status === "active" && user.mailAccountId && user.inboxStatus !== "disabled"
       ? await listOtpMessagesForMailAccount(user.mailAccountId)
       : [];
 
@@ -27,6 +27,7 @@ export default async function UserAccessRoute({ params }: UserAccessRouteProps) 
                 id: user.id,
                 name: user.name,
                 provider: user.provider,
+                hasInbox: Boolean(user.mailAccountId),
                 inboxAddress: user.inboxAddress,
                 status: user.status,
                 inboxStatus: user.inboxStatus

@@ -19,6 +19,19 @@ type SubMailAccountRow = {
   updated_at: string;
 };
 
+type SubMailAccountLookupRow = SubMailAccountRow & {
+  mail_accounts?:
+    | {
+        provider: "google" | "microsoft";
+        status: string;
+      }
+    | Array<{
+        provider: "google" | "microsoft";
+        status: string;
+      }>
+    | null;
+};
+
 export type SubMailAccountView = {
   id: string;
   mailAccountId: string;
@@ -91,6 +104,46 @@ export async function createSubMailAccount(input: z.infer<typeof createSubMailAc
   }
 
   const row = data as SubMailAccountRow;
+  return {
+    id: row.id,
+    mailAccountId: row.mail_account_id,
+    label: row.label,
+    displayEmail: row.display_email,
+    maxUsers: row.max_users,
+    connectedUsers: 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  } satisfies SubMailAccountView;
+}
+
+export async function getActiveSubMailAccountByDisplayEmail(displayEmail: string) {
+  const supabase = createSupabaseAdminClient();
+  const normalizedDisplayEmail = displayEmail.trim().toLowerCase();
+  const { data, error } = await supabase
+    .from("sub_mail_accounts")
+    .select(
+      "id, mail_account_id, label, display_email, max_users, created_at, updated_at, mail_accounts(provider, status)"
+    )
+    .eq("display_email", normalizedDisplayEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const row = data as unknown as SubMailAccountLookupRow;
+  const mailAccount = Array.isArray(row.mail_accounts)
+    ? (row.mail_accounts[0] ?? null)
+    : row.mail_accounts ?? null;
+
+  if (!mailAccount || mailAccount.status === "disabled") {
+    return null;
+  }
+
   return {
     id: row.id,
     mailAccountId: row.mail_account_id,

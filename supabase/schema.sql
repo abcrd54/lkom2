@@ -27,7 +27,7 @@ create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   phone_number text not null,
-  mail_account_id uuid not null references mail_accounts(id) on delete restrict,
+  mail_account_id uuid references mail_accounts(id) on delete restrict,
   sub_mail_account_id uuid references sub_mail_accounts(id) on delete restrict,
   access_token_encrypted text not null,
   access_token_hash text not null unique,
@@ -126,7 +126,10 @@ where users.sub_mail_account_id is null
   );
 
 alter table users
-alter column sub_mail_account_id set not null;
+alter column mail_account_id drop not null;
+
+alter table users
+alter column sub_mail_account_id drop not null;
 
 create index if not exists idx_users_mail_account_id on users(mail_account_id);
 create index if not exists idx_users_sub_mail_account_id on users(sub_mail_account_id);
@@ -184,6 +187,14 @@ declare
   sub_account_max_users integer;
   sub_account_mail_account_id uuid;
 begin
+  if new.sub_mail_account_id is null and new.mail_account_id is null then
+    return new;
+  end if;
+
+  if new.sub_mail_account_id is null and new.mail_account_id is not null then
+    raise exception 'mail account requires a matching sub mail account';
+  end if;
+
   select mail_account_id, max_users
   into sub_account_mail_account_id, sub_account_max_users
   from sub_mail_accounts
@@ -191,6 +202,10 @@ begin
 
   if sub_account_mail_account_id is null then
     raise exception 'sub mail account was not found';
+  end if;
+
+  if new.mail_account_id is null then
+    raise exception 'sub mail account requires a parent inbox';
   end if;
 
   if new.mail_account_id <> sub_account_mail_account_id then

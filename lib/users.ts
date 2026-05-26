@@ -7,7 +7,7 @@ import { z } from "zod";
 const baseUserSchema = z.object({
   name: z.string().trim().min(2).max(120),
   phoneNumber: z.string().trim().min(8).max(30),
-  subMailAccountId: z.string().uuid()
+  subMailAccountId: z.string().uuid().nullable().optional()
 });
 
 export const createUserSchema = baseUserSchema;
@@ -34,8 +34,8 @@ type UserRow = {
   id: string;
   name: string;
   phone_number: string;
-  mail_account_id: string;
-  sub_mail_account_id: string;
+  mail_account_id: string | null;
+  sub_mail_account_id: string | null;
   access_token_encrypted: string;
   status: UserStatus;
   link_disabled_at: string | null;
@@ -88,13 +88,13 @@ export type UserView = {
   name: string;
   phoneNumber: string;
   status: UserStatus;
-  mailAccountId: string;
-  subMailAccountId: string;
+  mailAccountId: string | null;
+  subMailAccountId: string | null;
   subMailAccountLabel: string;
-  provider: MailProvider;
+  provider: MailProvider | null;
   inboxAddress: string;
   sourceInboxAddress: string;
-  inboxStatus: string;
+  inboxStatus: string | null;
   linkDisabledAt: string | null;
   accessToken: string;
   createdAt: string;
@@ -121,11 +121,11 @@ function mapUserRow(row: UserRow): UserView {
     status: row.status,
     mailAccountId: row.mail_account_id,
     subMailAccountId: row.sub_mail_account_id,
-    subMailAccountLabel: subMailAccount?.label ?? "Primary",
-    provider: mailAccount?.provider ?? "google",
+    subMailAccountLabel: subMailAccount?.label ?? (mailAccount ? "Primary" : "Redeem"),
+    provider: mailAccount?.provider ?? null,
     inboxAddress: subMailAccount?.display_email ?? mailAccount?.email_address ?? "",
     sourceInboxAddress: mailAccount?.email_address ?? "",
-    inboxStatus: mailAccount?.status ?? "active",
+    inboxStatus: mailAccount?.status ?? null,
     linkDisabledAt: row.link_disabled_at,
     accessToken,
     createdAt: row.created_at,
@@ -145,6 +145,10 @@ function normalizePhoneNumber(phoneNumber: string) {
   }
 
   return digitsOnly;
+}
+
+export function normalizeUserPhoneNumber(phoneNumber: string) {
+  return normalizePhoneNumber(phoneNumber);
 }
 
 async function assertUniquePhoneNumber(phoneNumber: string, userId?: string) {
@@ -180,6 +184,22 @@ async function assertAssignableSubMailAccount(subMailAccountId: string) {
   }
 
   return subMailAccount;
+}
+
+async function resolveUserAssignment(subMailAccountId?: string | null) {
+  if (!subMailAccountId) {
+    return {
+      mailAccountId: null,
+      subMailAccountId: null
+    };
+  }
+
+  const subMailAccount = await assertAssignableSubMailAccount(subMailAccountId);
+
+  return {
+    mailAccountId: subMailAccount.mailAccountId,
+    subMailAccountId: subMailAccount.id
+  };
 }
 
 export async function listUsers() {
@@ -224,7 +244,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
 }
 
 export async function createUser(input: z.infer<typeof createUserSchema>) {
-  const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
+  const assignment = await resolveUserAssignment(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
   await assertUniquePhoneNumber(normalizedPhoneNumber);
 
@@ -238,8 +258,8 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
     .insert({
       name: input.name,
       phone_number: normalizedPhoneNumber,
-      mail_account_id: subMailAccount.mailAccountId,
-      sub_mail_account_id: subMailAccount.id,
+      mail_account_id: assignment.mailAccountId,
+      sub_mail_account_id: assignment.subMailAccountId,
       access_token_encrypted: accessTokenEncrypted,
       access_token_hash: accessTokenHash,
       status: "active",
@@ -258,7 +278,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
 }
 
 export async function updateUser(input: z.infer<typeof updateUserSchema>) {
-  const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
+  const assignment = await resolveUserAssignment(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
   await assertUniquePhoneNumber(normalizedPhoneNumber, input.userId);
 
@@ -266,15 +286,15 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
   const payload: {
     name: string;
     phone_number: string;
-    mail_account_id: string;
-    sub_mail_account_id: string;
+    mail_account_id: string | null;
+    sub_mail_account_id: string | null;
     status?: UserStatus;
     link_disabled_at?: string | null;
   } = {
     name: input.name,
     phone_number: normalizedPhoneNumber,
-    mail_account_id: subMailAccount.mailAccountId,
-    sub_mail_account_id: subMailAccount.id
+    mail_account_id: assignment.mailAccountId,
+    sub_mail_account_id: assignment.subMailAccountId
   };
 
   if (input.status) {
@@ -365,6 +385,28 @@ export async function getUserByAccessToken(token: string) {
       "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .eq("access_token_hash", hashAccessToken(token))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return mapUserRow(data as unknown as UserRow);
+}
+
+export async function findUserByPhoneNumber(phoneNumber: string) {
+  const supabase = createSupabaseAdminClient();
+  const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+  const { data, error } = await supabase
+    .from("users")
+    .select(
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+    )
+    .eq("phone_number", normalizedPhoneNumber)
     .maybeSingle();
 
   if (error) {

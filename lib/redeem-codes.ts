@@ -54,6 +54,10 @@ function normalizeRedeemCode(code: string) {
   return code.trim().toUpperCase().replace(/\s+/g, "");
 }
 
+export function normalizeImportedRedeemCode(code: string) {
+  return normalizeRedeemCode(code);
+}
+
 function mapRedeemCodeRow(row: RedeemCodeRow) {
   const assignments =
     row.redeem_code_users?.map((assignment) => {
@@ -255,4 +259,29 @@ export async function getRedeemCodeForUser(userId: string) {
     : data.redeem_codes ?? null;
 
   return relation?.code ?? null;
+}
+
+export async function getRedeemCodeByCode(code: string) {
+  const supabase = createSupabaseAdminClient();
+  const normalizedCode = normalizeRedeemCode(code);
+  const { data, error } = await supabase
+    .from("redeem_codes")
+    .select("id, code, created_at, updated_at")
+    .eq("code", normalizedCode)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    code: data.code,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at
+  };
 }
