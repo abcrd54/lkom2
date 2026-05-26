@@ -7,9 +7,11 @@ const ADMIN_PROTECTED_PREFIXES = [
   "/mail-accounts",
   "/users",
   "/otp-inbox",
+  "/redeem",
   "/whatsapp",
   "/api/admin",
   "/api/users",
+  "/api/redeem",
   "/api/providers",
   "/api/whatsapp"
 ];

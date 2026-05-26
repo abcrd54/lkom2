@@ -713,6 +713,99 @@ textarea {
   font-size: 12px;
 }
 
+.redeem-feedback {
+  margin: 16px 18px 0;
+  font-size: 13px;
+}
+
+.redeem-feedback.success {
+  color: #1d6d34;
+}
+
+.redeem-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  padding: 18px;
+}
+
+.redeem-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
+.redeem-card-empty {
+  min-height: 220px;
+  align-content: center;
+}
+
+.redeem-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.redeem-card-head h4 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  word-break: break-word;
+}
+
+.redeem-card-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.redeem-assignments {
+  display: grid;
+  gap: 10px;
+}
+
+.redeem-assignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: white;
+}
+
+.redeem-assignment strong,
+.redeem-assignment span {
+  display: block;
+}
+
+.redeem-assignment span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.redeem-assign-form {
+  display: grid;
+  gap: 10px;
+}
+
+.redeem-assign-form select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: white;
+  padding: 10px 12px;
+  color: var(--foreground);
+  font-size: 14px;
+}
+
 .log-recipient-list {
   display: grid;
   gap: 4px;

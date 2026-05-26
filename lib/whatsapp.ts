@@ -30,6 +30,7 @@ type WhatsappLogRow = {
     userId: string;
     name: string;
     phoneNumber: string;
+    redeemCode?: string | null;
   }>;
   recipient_count: number;
   status: "queued" | "sent" | "failed" | "partial";
@@ -44,7 +45,37 @@ type RecipientRow = {
   phone_number: string;
   status: "active" | "disabled";
   access_token_encrypted: string;
+  redeem_code_users?:
+    | Array<{
+        assigned_at: string;
+        redeem_codes?:
+          | {
+              code: string;
+            }
+          | Array<{
+              code: string;
+            }>
+          | null;
+      }>
+    | null;
 };
+
+function getLatestRedeemCode(
+  assignments: RecipientRow["redeem_code_users"]
+): string | null {
+  if (!assignments || assignments.length === 0) {
+    return null;
+  }
+
+  const latestAssignment = [...assignments].sort((left, right) =>
+    right.assigned_at.localeCompare(left.assigned_at)
+  )[0];
+  const relation = Array.isArray(latestAssignment?.redeem_codes)
+    ? latestAssignment.redeem_codes[0] ?? null
+    : latestAssignment?.redeem_codes ?? null;
+
+  return relation?.code ?? null;
+}
 
 export async function listWhatsappTemplates() {
   const supabase = createSupabaseAdminClient();
@@ -123,7 +154,9 @@ export async function listWhatsappRecipients() {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("users")
-    .select("id, name, phone_number, status, access_token_encrypted")
+    .select(
+      "id, name, phone_number, status, access_token_encrypted, redeem_code_users(assigned_at, redeem_codes(code))"
+    )
     .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(100);
@@ -139,7 +172,8 @@ export async function listWhatsappRecipients() {
     name: row.name,
     phoneNumber: row.phone_number,
     status: row.status,
-    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted))
+    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
+    redeemCode: getLatestRedeemCode(row.redeem_code_users)
   }));
 }
 
@@ -162,7 +196,9 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("users")
-    .select("id, name, phone_number, status, access_token_encrypted")
+    .select(
+      "id, name, phone_number, status, access_token_encrypted, redeem_code_users(assigned_at, redeem_codes(code))"
+    )
     .in("id", recipientUserIds)
     .eq("status", "active");
 
@@ -176,7 +212,8 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
     id: row.id,
     name: row.name,
     phoneNumber: row.phone_number,
-    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted))
+    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
+    redeemCode: getLatestRedeemCode(row.redeem_code_users)
   }));
 }
 
@@ -199,14 +236,17 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
   const target = recipients
     .map(
       (recipient) =>
-        `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${recipient.accessLink}`
+        `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${recipient.accessLink}|${recipient.redeemCode ?? "-"}`
     )
     .join(",");
   const formData = new FormData();
   formData.set("target", target);
   formData.set(
     "message",
-    template.message.replaceAll("{phone}", "{var1}").replaceAll("{link}", "{var2}")
+    template.message
+      .replaceAll("{phone}", "{var1}")
+      .replaceAll("{link}", "{var2}")
+      .replaceAll("{code}", "{var3}")
   );
   formData.set("countryCode", "0");
 

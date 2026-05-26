@@ -66,10 +66,10 @@ type UserAccessApiPayload =
 
 export function UserAccessPage({ accessToken, user, messages }: UserAccessPageProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [liveMessages, setLiveMessages] = useState(messages);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 10_000);
@@ -87,7 +87,11 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
 
     let cancelled = false;
 
-    async function refreshOtpMessages() {
+    async function refreshOtpMessages(showRefreshState = false) {
+      if (showRefreshState) {
+        setIsRefreshing(true);
+      }
+
       try {
         const response = await fetch(`/api/access/${accessToken}/otp`, {
           cache: "no-store"
@@ -103,6 +107,10 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
         }
       } catch {
         // Keep the last known state if polling fails temporarily.
+      } finally {
+        if (showRefreshState) {
+          setIsRefreshing(false);
+        }
       }
     }
 
@@ -162,16 +170,25 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
     }
   }
 
-  async function handleCopyLink() {
+  async function handleRefresh() {
+    setIsRefreshing(true);
+
     try {
-      await navigator.clipboard.writeText(window.location.href);
-      setCopiedLink(true);
-      showToast("Access link copied");
-      window.setTimeout(() => {
-        setCopiedLink(false);
-      }, 1800);
+      const response = await fetch(`/api/access/${accessToken}/otp`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json()) as UserAccessApiPayload;
+
+      if (!response.ok || !payload.ok) {
+        throw new Error("Refresh failed.");
+      }
+
+      setLiveMessages(payload.data.items);
+      showToast("OTP refreshed");
     } catch {
-      setCopiedLink(false);
+      showToast("Refresh failed");
+    } finally {
+      setIsRefreshing(false);
     }
   }
 
@@ -220,18 +237,18 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
             <h2>Latest OTP</h2>
             <p>Recent codes received for this inbox.</p>
           </div>
-          <button className="button secondary" onClick={handleCopyLink} type="button">
-            {copiedLink ? "Copied" : "Copy Link"}
+          <button className="button secondary" onClick={handleRefresh} type="button">
+            {isRefreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 
         <div className="user-otp-grid">
           {liveMessages.length > 0 ? (
-            liveMessages.map((message) => (
+            liveMessages.map((message, index) => (
               <article className="user-otp-card" key={message.id}>
                 <div className="user-otp-head">
                   <span className="user-otp-time">{formatDateTime(message.receivedAt)}</span>
-                  <span className="user-otp-badge">New</span>
+                  {index === 0 ? <span className="user-otp-badge">New</span> : null}
                 </div>
                 <h3>{message.subject || "OTP Message"}</h3>
                 <div className="user-otp-code">{message.otpCode}</div>

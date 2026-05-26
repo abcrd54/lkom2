@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import { ConnectProviderButton } from "@/components/connect-provider-buttons";
 import { LogoutButton } from "@/components/logout-button";
+import { RedeemSection } from "@/components/redeem-section";
 import { getDashboardPath, type DashboardTab } from "@/lib/admin-dashboard";
 import { cn } from "@/lib/utils";
 import type { MailProvider, UserStatus } from "@/lib/types";
@@ -53,6 +54,26 @@ type OtpMessageView = {
   createdAt?: string;
 };
 
+type RedeemCodeView = {
+  id: string;
+  code: string;
+  createdAt: string;
+  updatedAt: string;
+  usedSlots: number;
+  remainingSlots: number;
+  assignments: Array<{
+    id: string;
+    userId: string;
+    assignedAt: string;
+    user: {
+      id: string;
+      name: string;
+      phoneNumber: string;
+      status: UserStatus;
+    } | null;
+  }>;
+};
+
 type AdminDashboardProps = {
   adminEmail: string | null;
   activeTab: DashboardTab;
@@ -81,6 +102,13 @@ type AdminDashboardProps = {
     totalPages: number;
     total: number;
   };
+  redeemCodes?: RedeemCodeView[];
+  redeemUsers?: Array<{
+    id: string;
+    name: string;
+    phoneNumber: string;
+    status: UserStatus;
+  }>;
   whatsappTemplates?: Array<{
     id: string;
     name: string;
@@ -110,6 +138,7 @@ type AdminDashboardProps = {
     phoneNumber: string;
     status: "active" | "disabled";
     accessLink: string;
+    redeemCode: string | null;
   }>;
 };
 
@@ -118,6 +147,7 @@ const NAV_ITEMS: { id: DashboardTab; label: string }[] = [
   { id: "connect-mail", label: "Connect Mail" },
   { id: "manage-user", label: "Manage User" },
   { id: "otp-inbox", label: "OTP Inbox" },
+  { id: "redeem", label: "Redeem" },
   { id: "whatsapp", label: "Kirim WhatsApp" }
 ];
 
@@ -1028,12 +1058,18 @@ function WhatsappSection({
 
   function renderWhatsappTemplatePreview(
     message: string,
-    recipient: { name: string; phoneNumber: string; accessLink: string }
+    recipient: {
+      name: string;
+      phoneNumber: string;
+      accessLink: string;
+      redeemCode: string | null;
+    }
   ) {
     return message
       .replaceAll("{name}", recipient.name)
       .replaceAll("{phone}", recipient.phoneNumber)
-      .replaceAll("{link}", recipient.accessLink);
+      .replaceAll("{link}", recipient.accessLink)
+      .replaceAll("{code}", recipient.redeemCode ?? "-");
   }
 
   function toggleRecipient(recipientId: string) {
@@ -1152,6 +1188,7 @@ function WhatsappSection({
             <code>{`{name}`}</code>
             <code>{`{phone}`}</code>
             <code>{`{link}`}</code>
+            <code>{`{code}`}</code>
           </div>
           <div className="button-row toolbar-row">
             <button className="button" disabled={isSavingTemplate} type="submit">
@@ -1391,6 +1428,8 @@ export function AdminDashboard({
   mailAccounts,
   users,
   otpMessages,
+  redeemCodes,
+  redeemUsers,
   whatsappTemplates,
   whatsappLogs,
   whatsappRecipients
@@ -1499,7 +1538,9 @@ export function AdminDashboard({
                     ? "Assign users to active inbox slots."
                     : activeTab === "otp-inbox"
                       ? "Review recent OTP messages."
-                      : "Prepare templates, choose recipients, and send WhatsApp."}
+                      : activeTab === "redeem"
+                        ? "Create standalone redeem codes and assign up to 3 users."
+                        : "Prepare templates, choose recipients, and send WhatsApp."}
             </p>
           </div>
         </section>
@@ -1530,6 +1571,10 @@ export function AdminDashboard({
         ) : null}
 
         {activeTab === "otp-inbox" ? <OtpInboxSection otpMessages={otpMessages} fullWidth /> : null}
+
+        {activeTab === "redeem" ? (
+          <RedeemSection redeemCodes={redeemCodes ?? []} users={redeemUsers ?? []} fullWidth />
+        ) : null}
 
         {activeTab === "whatsapp" ? (
           <WhatsappSection
