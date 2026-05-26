@@ -1,5 +1,6 @@
 import type { MailAccountStatus, MailProvider } from "@/lib/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { decryptSecret, encryptSecret } from "@/lib/secrets";
 
 const ACTIVE_STATUSES = ["active", "reauth_required"] as const;
 
@@ -15,6 +16,26 @@ export type MailAccountRecord = {
 
 type ConnectedUsersCountRow = {
   mail_account_id: string;
+};
+
+type SyncableMailAccountRow = {
+  id: string;
+  provider: MailProvider;
+  email_address: string;
+  refresh_token_encrypted: string;
+  token_expires_at: string | null;
+  status: MailAccountStatus;
+  last_checked_at: string | null;
+};
+
+export type SyncableMailAccount = {
+  id: string;
+  provider: MailProvider;
+  emailAddress: string;
+  refreshToken: string;
+  tokenExpiresAt: string | null;
+  status: MailAccountStatus;
+  lastCheckedAt: string | null;
 };
 
 export async function listMailAccounts() {
@@ -117,4 +138,67 @@ export async function getMailAccountById(mailAccountId: string) {
   }
 
   return data;
+}
+
+export async function listSyncableMailAccounts() {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("mail_accounts")
+    .select(
+      "id, provider, email_address, refresh_token_encrypted, token_expires_at, status, last_checked_at"
+    )
+    .neq("status", "disabled")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data ?? []) as SyncableMailAccountRow[]).map((account) => ({
+    id: account.id,
+    provider: account.provider,
+    emailAddress: account.email_address,
+    refreshToken: decryptSecret(account.refresh_token_encrypted),
+    tokenExpiresAt: account.token_expires_at,
+    status: account.status,
+    lastCheckedAt: account.last_checked_at
+  })) satisfies SyncableMailAccount[];
+}
+
+export async function updateMailAccountTokenState(input: {
+  mailAccountId: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string | null;
+  status?: MailAccountStatus;
+  lastCheckedAt?: string;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const payload: {
+    refresh_token_encrypted?: string;
+    token_expires_at?: string | null;
+    status?: MailAccountStatus;
+    last_checked_at?: string;
+  } = {};
+
+  if (input.refreshToken) {
+    payload.refresh_token_encrypted = encryptSecret(input.refreshToken);
+  }
+
+  if ("tokenExpiresAt" in input) {
+    payload.token_expires_at = input.tokenExpiresAt ?? null;
+  }
+
+  if (input.status) {
+    payload.status = input.status;
+  }
+
+  if (input.lastCheckedAt) {
+    payload.last_checked_at = input.lastCheckedAt;
+  }
+
+  const { error } = await supabase.from("mail_accounts").update(payload).eq("id", input.mailAccountId);
+
+  if (error) {
+    throw error;
+  }
 }
