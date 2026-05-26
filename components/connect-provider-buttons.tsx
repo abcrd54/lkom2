@@ -19,12 +19,8 @@ export function ConnectProviderButton({
   function handleClick() {
     const popupName =
       provider === "microsoft" ? `${provider}-oauth-${Date.now()}` : `${provider}-oauth`;
-    const popupFeatures =
-      provider === "microsoft"
-        ? `${POPUP_FEATURES},noopener=yes,noreferrer=yes`
-        : POPUP_FEATURES;
 
-    window.open(`/api/providers/${provider}/connect`, popupName, popupFeatures);
+    window.open(`/api/providers/${provider}/connect`, popupName, POPUP_FEATURES);
   }
 
   return (

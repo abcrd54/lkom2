@@ -699,13 +699,14 @@ function ManageUserSection({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdAccessLink, setCreatedAccessLink] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<
-    Array<{ name: string; phoneNumber: string; inboxEmail: string }>
+    Array<{ name: string; phoneNumber: string; emailConnect: string }>
   >([]);
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<{
     successCount: number;
-    failed: Array<{ row: number; reason: string }>;
+    failedCount: number;
+    failed: Array<{ row: number; name: string; phoneNumber: string; emailConnect: string; reason: string }>;
   } | null>(null);
 
   const activeMailAccounts = mailAccounts.filter((account) => account.status !== "disabled");
@@ -788,7 +789,7 @@ function ManageUserSection({
   }
 
   function downloadTemplate() {
-    const csv = "name,phoneNumber,inboxEmail\n";
+    const csv = "name,phoneNumber,email_connect\n";
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -829,22 +830,26 @@ function ManageUserSection({
         return {
           name: normalizedEntries.name ?? "",
           phoneNumber: normalizedEntries.phonenumber ?? "",
-          inboxEmail:
-            normalizedEntries.inboxemail ?? normalizedEntries.inbox ?? normalizedEntries.email ?? ""
+          emailConnect:
+            normalizedEntries.emailconnect ??
+            normalizedEntries.inboxemail ??
+            normalizedEntries.inbox ??
+            normalizedEntries.email ??
+            ""
         };
       })
-      .filter((row) => row.name || row.phoneNumber || row.inboxEmail);
+      .filter((row) => row.name || row.phoneNumber || row.emailConnect);
 
     if (parsedRows.length === 0) {
       throw new Error("Import file is empty or template headers are invalid.");
     }
 
     const invalidRow = parsedRows.find(
-      (row) => !row.name || !row.phoneNumber || !row.inboxEmail
+      (row) => !row.name || !row.phoneNumber || !row.emailConnect
     );
 
     if (invalidRow) {
-      throw new Error("Each import row must include name, phoneNumber, and inboxEmail.");
+      throw new Error("Each import row must include name, phoneNumber, and email_connect.");
     }
 
     return parsedRows;
@@ -930,18 +935,27 @@ function ManageUserSection({
     setErrorMessage(null);
     setBulkResult(null);
 
-    const failed: Array<{ row: number; reason: string }> = [];
+    const failed: Array<{
+      row: number;
+      name: string;
+      phoneNumber: string;
+      emailConnect: string;
+      reason: string;
+    }> = [];
     let successCount = 0;
 
     try {
       for (const [index, row] of bulkRows.entries()) {
         setBulkProgress(`Importing ${index + 1} of ${bulkRows.length}...`);
-        const subMailAccountIdForRow = subAccountIdByEmail.get(row.inboxEmail.trim().toLowerCase());
+        const subMailAccountIdForRow = subAccountIdByEmail.get(row.emailConnect.trim().toLowerCase());
 
         if (!subMailAccountIdForRow) {
           failed.push({
             row: index + 2,
-            reason: `Sub account not found or disabled: ${row.inboxEmail}`
+            name: row.name,
+            phoneNumber: row.phoneNumber,
+            emailConnect: row.emailConnect,
+            reason: `Sub account not found or disabled: ${row.emailConnect}`
           });
           continue;
         }
@@ -976,6 +990,9 @@ function ManageUserSection({
         } catch (error) {
           failed.push({
             row: index + 2,
+            name: row.name,
+            phoneNumber: row.phoneNumber,
+            emailConnect: row.emailConnect,
             reason: error instanceof Error ? error.message : "Failed to create user."
           });
         }
@@ -983,6 +1000,7 @@ function ManageUserSection({
 
       setBulkResult({
         successCount,
+        failedCount: failed.length,
         failed
       });
       setBulkProgress(null);
@@ -1194,9 +1212,9 @@ function ManageUserSection({
                 </div>
                 <div className="import-template-note">
                   Template headers:
-                  <code>name,phoneNumber,inboxEmail</code>
+                  <code>name,phoneNumber,email_connect</code>
                 </div>
-                <p className="micro">Use `inboxEmail` from the Sub-Gmail display email list.</p>
+                <p className="micro">Use `email_connect` from the Sub-Gmail display email list.</p>
                 {bulkFileName ? (
                   <p className="micro">
                     {bulkFileName} | {bulkRows.length} row(s) ready
@@ -1206,12 +1224,15 @@ function ManageUserSection({
                 {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
                 {bulkResult ? (
                   <div className="form-feedback success-block">
-                    <p className="success-title">{bulkResult.successCount} user(s) imported</p>
+                    <p className="success-title">
+                      {bulkResult.successCount} user(s) imported | {bulkResult.failedCount} failed
+                    </p>
                     {bulkResult.failed.length > 0 ? (
                       <div className="bulk-failed-list">
                         {bulkResult.failed.map((failedRow) => (
-                          <p className="micro" key={`${failedRow.row}-${failedRow.reason}`}>
-                            Row {failedRow.row}: {failedRow.reason}
+                          <p className="micro" key={`${failedRow.row}-${failedRow.phoneNumber}-${failedRow.reason}`}>
+                            Row {failedRow.row} | {failedRow.name} | {failedRow.phoneNumber} |{" "}
+                            {failedRow.emailConnect}: {failedRow.reason}
                           </p>
                         ))}
                       </div>

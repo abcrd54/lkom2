@@ -147,6 +147,31 @@ function normalizePhoneNumber(phoneNumber: string) {
   return digitsOnly;
 }
 
+async function assertUniquePhoneNumber(phoneNumber: string, userId?: string) {
+  const supabase = createSupabaseAdminClient();
+  let query = supabase
+    .from("users")
+    .select("id, name", { count: "exact" })
+    .eq("phone_number", phoneNumber);
+
+  if (userId) {
+    query = query.neq("id", userId);
+  }
+
+  const { data, error, count } = await query.limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  if ((count ?? 0) > 0) {
+    const existingUser = Array.isArray(data) ? data[0] : null;
+    const existingName =
+      existingUser && typeof existingUser.name === "string" ? existingUser.name : "another user";
+    throw new Error(`Phone number is already used by ${existingName}.`);
+  }
+}
+
 async function assertAssignableSubMailAccount(subMailAccountId: string) {
   const subMailAccount = await getSubMailAccountById(subMailAccountId);
 
@@ -201,6 +226,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
 export async function createUser(input: z.infer<typeof createUserSchema>) {
   const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await assertUniquePhoneNumber(normalizedPhoneNumber);
 
   const supabase = createSupabaseAdminClient();
   const accessToken = generateAccessToken();
@@ -234,6 +260,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
 export async function updateUser(input: z.infer<typeof updateUserSchema>) {
   const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await assertUniquePhoneNumber(normalizedPhoneNumber, input.userId);
 
   const supabase = createSupabaseAdminClient();
   const payload: {

@@ -233,7 +233,32 @@ export async function listWhatsappLogs(limit = 50) {
   }));
 }
 
+async function listSentWhatsappRecipientUserIds() {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("whatsapp_logs")
+    .select("recipients")
+    .eq("status", "sent")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Set(
+    ((data ?? []) as Array<{ recipients: WhatsappLogRow["recipients"] }>).flatMap((row) =>
+      Array.isArray(row.recipients)
+        ? row.recipients
+            .map((recipient) => recipient.userId)
+            .filter((userId): userId is string => typeof userId === "string" && userId.length > 0)
+        : []
+    )
+  );
+}
+
 export async function listWhatsappRecipients() {
+  const sentRecipientUserIds = await listSentWhatsappRecipientUserIds();
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("users")
@@ -250,16 +275,18 @@ export async function listWhatsappRecipients() {
 
   const origin = env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-  return ((data ?? []) as RecipientRow[]).map((row) => ({
-    id: row.id,
-    name: row.name,
-    phoneNumber: row.phone_number,
-    status: row.status,
-    email: getDisplayEmail(row),
-    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
-    redeemCode: getLatestRedeemCode(row.redeem_code_users),
-    redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
-  }));
+  return ((data ?? []) as RecipientRow[])
+    .filter((row) => !sentRecipientUserIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      phoneNumber: row.phone_number,
+      status: row.status,
+      email: getDisplayEmail(row),
+      accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
+      redeemCode: getLatestRedeemCode(row.redeem_code_users),
+      redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
+    }));
 }
 
 async function getTemplateById(templateId: string) {
@@ -278,6 +305,7 @@ async function getTemplateById(templateId: string) {
 }
 
 async function getRecipientsByIds(recipientUserIds: string[]) {
+  const sentRecipientUserIds = await listSentWhatsappRecipientUserIds();
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("users")
@@ -293,15 +321,17 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
 
   const origin = env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-  return ((data ?? []) as RecipientRow[]).map((row) => ({
-    id: row.id,
-    name: row.name,
-    phoneNumber: row.phone_number,
-    email: getDisplayEmail(row),
-    accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
-    redeemCode: getLatestRedeemCode(row.redeem_code_users),
-    redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
-  }));
+  return ((data ?? []) as RecipientRow[])
+    .filter((row) => !sentRecipientUserIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      phoneNumber: row.phone_number,
+      email: getDisplayEmail(row),
+      accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
+      redeemCode: getLatestRedeemCode(row.redeem_code_users),
+      redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
+    }));
 }
 
 export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSchema>) {
@@ -317,7 +347,7 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
   const recipients = await getRecipientsByIds(input.recipientUserIds);
 
   if (recipients.length !== input.recipientUserIds.length) {
-    throw new Error("One or more selected recipients are invalid or inactive.");
+    throw new Error("One or more selected recipients are invalid, inactive, or already sent.");
   }
 
   const target = recipients

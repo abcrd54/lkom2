@@ -130,6 +130,7 @@ alter column sub_mail_account_id set not null;
 
 create index if not exists idx_users_mail_account_id on users(mail_account_id);
 create index if not exists idx_users_sub_mail_account_id on users(sub_mail_account_id);
+create unique index if not exists idx_users_phone_number_unique on users(phone_number);
 create index if not exists idx_sub_mail_accounts_mail_account_id on sub_mail_accounts(mail_account_id);
 create index if not exists idx_otp_messages_mail_account_id_received_at on otp_messages(mail_account_id, received_at desc);
 create index if not exists idx_redeem_code_users_redeem_code_id on redeem_code_users(redeem_code_id);
