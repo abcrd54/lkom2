@@ -15,6 +15,18 @@ export type ProviderPayload = {
   refreshedEmailCode?: string | null;
 } & Record<string, unknown>;
 
+const CHINESE_TEXT_MAP: Record<string, string> = {
+  "系统成品号": "Produk sistem",
+  "已使用": "Sudah digunakan",
+  "未使用": "Belum digunakan",
+  "已激活": "Sudah aktif",
+  "未激活": "Belum aktif",
+  "订阅开通成功": "Langganan berhasil diaktifkan",
+  "订阅开通失败": "Langganan gagal diaktifkan",
+  "成功": "Berhasil",
+  "失败": "Gagal"
+};
+
 export type RedeemLookupResult =
   | {
       ok: true;
@@ -61,7 +73,7 @@ export function activationLabel(status: string | null | undefined) {
     return "Berhasil";
   }
 
-  return status;
+  return translateChineseText(status);
 }
 
 export function asProviderPayload(payload: unknown): ProviderPayload | null {
@@ -69,5 +81,20 @@ export function asProviderPayload(payload: unknown): ProviderPayload | null {
     return null;
   }
 
+  const record = payload as Record<string, unknown>;
+  const nestedData = record.data;
+
+  if (nestedData && typeof nestedData === "object" && !Array.isArray(nestedData)) {
+    return nestedData as ProviderPayload;
+  }
+
   return payload as ProviderPayload;
+}
+
+export function translateChineseText(value: string | null | undefined) {
+  if (!value) {
+    return value ?? "";
+  }
+
+  return CHINESE_TEXT_MAP[value] ?? value;
 }

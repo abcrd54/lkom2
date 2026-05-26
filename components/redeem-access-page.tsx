@@ -5,6 +5,7 @@ import {
   activationLabel,
   asProviderPayload,
   formatRedeemDateTime,
+  translateChineseText,
   type RedeemLookupResult
 } from "@/lib/redeem-access-shared";
 
@@ -113,7 +114,7 @@ export function RedeemAccessPage({
 
             <div className="redeem-provider-panel">
               <div className="redeem-provider-head">
-                <strong>{providerPayload?.message ?? "Hasil Redeem"}</strong>
+                <strong>{translateChineseText(providerPayload?.message) || "Hasil Redeem"}</strong>
                 <span className="micro">{result.queryUrl}</span>
               </div>
 
@@ -121,11 +122,11 @@ export function RedeemAccessPage({
                 <div className="redeem-detail-list">
                   <div className="redeem-detail-row">
                     <span>Status Key</span>
-                    <strong>{providerPayload.keyStatus ?? "-"}</strong>
+                    <strong>{translateChineseText(providerPayload.keyStatus) || "-"}</strong>
                   </div>
                   <div className="redeem-detail-row">
                     <span>Tipe Key</span>
-                    <strong>{providerPayload.keyType ?? "-"}</strong>
+                    <strong>{translateChineseText(providerPayload.keyType) || "-"}</strong>
                   </div>
                   <div className="redeem-detail-row">
                     <span>Nomor Tugas</span>
