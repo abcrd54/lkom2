@@ -539,6 +539,10 @@ textarea {
   padding: 18px 18px 0;
 }
 
+.table-toolbar {
+  margin-bottom: 14px;
+}
+
 .search-field {
   min-width: min(100%, 320px);
 }

@@ -70,6 +70,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [liveMessages, setLiveMessages] = useState(messages);
+  const [newMessageIds, setNewMessageIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
@@ -79,6 +80,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
 
   useEffect(() => {
     setLiveMessages(messages);
+    setNewMessageIds([]);
   }, [messages]);
 
   useEffect(() => {
@@ -104,7 +106,26 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
         }
 
         if (!cancelled) {
-          setLiveMessages(payload.data.items);
+          setLiveMessages((current) => {
+            const existingIds = new Set(current.map((message) => message.id));
+            const incomingNewIds = payload.data.items
+              .filter((message) => !existingIds.has(message.id))
+              .map((message) => message.id);
+
+            if (incomingNewIds.length > 0) {
+              setNewMessageIds((currentIds) => {
+                const mergedIds = Array.from(new Set([...currentIds, ...incomingNewIds]));
+                window.setTimeout(() => {
+                  setNewMessageIds((latestIds) =>
+                    latestIds.filter((id) => !incomingNewIds.includes(id))
+                  );
+                }, 12000);
+                return mergedIds;
+              });
+            }
+
+            return payload.data.items;
+          });
         }
       } catch {
         // Keep the last known state if polling fails temporarily.
@@ -197,7 +218,26 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
         throw new Error("Refresh failed.");
       }
 
-      setLiveMessages(payload.data.items);
+      setLiveMessages((current) => {
+        const existingIds = new Set(current.map((message) => message.id));
+        const incomingNewIds = payload.data.items
+          .filter((message) => !existingIds.has(message.id))
+          .map((message) => message.id);
+
+        if (incomingNewIds.length > 0) {
+          setNewMessageIds((currentIds) => {
+            const mergedIds = Array.from(new Set([...currentIds, ...incomingNewIds]));
+            window.setTimeout(() => {
+              setNewMessageIds((latestIds) =>
+                latestIds.filter((id) => !incomingNewIds.includes(id))
+              );
+            }, 12000);
+            return mergedIds;
+          });
+        }
+
+        return payload.data.items;
+      });
       showToast("OTP refreshed");
     } catch {
       showToast("Refresh failed");
@@ -274,11 +314,11 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
 
         <div className="user-otp-grid">
           {liveMessages.length > 0 ? (
-            liveMessages.map((message, index) => (
+            liveMessages.map((message) => (
               <article className="user-otp-card" key={message.id}>
                 <div className="user-otp-head">
                   <span className="user-otp-time">{formatDateTime(message.receivedAt)}</span>
-                  {index === 0 ? <span className="user-otp-badge">New</span> : null}
+                  {newMessageIds.includes(message.id) ? <span className="user-otp-badge">New</span> : null}
                 </div>
                 <h3>{message.subject || "OTP Message"}</h3>
                 <div className="user-otp-code">{message.otpCode}</div>

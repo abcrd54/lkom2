@@ -723,6 +723,7 @@ function ManageUserSection({
     ])
   );
   const [copiedAccessUserId, setCopiedAccessUserId] = useState<string | null>(null);
+  const rowNumberOffset = users ? (users.page - 1) * 10 : 0;
   const filteredUsers =
     users?.items.filter((user) => {
       const query = userSearch.trim().toLowerCase();
@@ -1007,7 +1008,7 @@ function ManageUserSection({
           </button>
         </div>
       </div>
-      <div className="toolbar-inline">
+      <div className="toolbar-inline table-toolbar">
         <div className="field search-field">
           <label htmlFor="user-search">Search user</label>
           <input
@@ -1024,6 +1025,7 @@ function ManageUserSection({
         <table className="data-table adminlte-table">
           <thead>
             <tr>
+              <th>No</th>
               <th>Nama</th>
               <th>Nomor HP</th>
               <th>Provider</th>
@@ -1034,8 +1036,9 @@ function ManageUserSection({
           </thead>
           <tbody>
             {filteredUsers.length > 0 ? (
-              filteredUsers.map((user) => (
+              filteredUsers.map((user, index) => (
                 <tr key={user.id}>
+                  <td>{rowNumberOffset + index + 1}</td>
                   <td>{user.name}</td>
                   <td>{user.phoneNumber}</td>
                   <td>{providerLabel(user.provider)}</td>
@@ -1070,7 +1073,7 @@ function ManageUserSection({
               ))
             ) : (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   {users?.items.length ? "No users match your search." : "No users in database yet."}
                 </td>
               </tr>
@@ -1081,7 +1084,7 @@ function ManageUserSection({
 
       {users ? (
         <div className="card-footer">
-          <span className="results-meta">{users.total} users total</span>
+          <span className="results-meta">{users.total} users total | 10 per page</span>
           <Pagination
             currentPage={users.page}
             totalPages={users.totalPages}
@@ -1872,25 +1875,6 @@ export function AdminDashboard({
             <span className="topbar-chip muted">{stats.inboxCount} inbox</span>
           </div>
         </header>
-
-        <section className="content-header">
-          <div>
-            <h2>{NAV_ITEMS.find((item) => item.id === activeTab)?.label ?? "Dashboard"}</h2>
-            <p>
-              {activeTab === "overview"
-                ? "Quick view of inboxes, users, and OTP activity."
-                : activeTab === "connect-mail"
-                  ? "Connect and review provider inboxes."
-                  : activeTab === "manage-user"
-                    ? "Assign users to active inbox slots."
-                    : activeTab === "otp-inbox"
-                      ? "Review recent OTP messages."
-                      : activeTab === "redeem"
-                        ? "Create standalone redeem codes and assign up to 3 users."
-                        : "Prepare templates, choose recipients, and send WhatsApp."}
-            </p>
-          </div>
-        </section>
 
         {oauthFeedback?.message ? (
           <section className="alert-strip">
