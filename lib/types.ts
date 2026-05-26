@@ -9,6 +9,13 @@ export type MailAccount = {
   status: MailAccountStatus;
   connectedUsers: number;
   lastSyncAt: string;
+  subAccounts?: Array<{
+    id: string;
+    label: string;
+    displayEmail: string;
+    maxUsers: number;
+    connectedUsers: number;
+  }>;
 };
 
 export type ManagedUser = {
@@ -16,8 +23,10 @@ export type ManagedUser = {
   name: string;
   phoneNumber: string;
   mailAccountId: string;
+  subMailAccountId: string;
   provider: MailProvider;
   inboxAddress: string;
+  sourceInboxAddress?: string;
   status: UserStatus;
 };
 

@@ -1102,13 +1102,6 @@ textarea {
   letter-spacing: 0.02em;
 }
 
-.user-access-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 12px;
-  width: min(100%, 360px);
-}
-
 .user-summary-card {
   display: grid;
   gap: 8px;
@@ -1133,6 +1126,13 @@ textarea {
   word-break: break-word;
 }
 
+.user-summary-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .user-access-section-head {
   display: flex;
   align-items: center;
@@ -1152,6 +1152,51 @@ textarea {
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.user-access-actions {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.user-summary-card-email {
+  min-width: min(100%, 320px);
+  max-width: 360px;
+}
+
+.user-copy-icon-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: white;
+  color: var(--accent-strong);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.user-copy-icon-button:hover {
+  background: #eef5ff;
+  border-color: rgba(0, 123, 255, 0.28);
+}
+
+.user-copy-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.user-refresh-button {
+  min-width: 144px;
+  min-height: 64px;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .user-otp-grid {
@@ -1493,8 +1538,18 @@ textarea {
     padding: 18px;
   }
 
-  .user-access-summary {
-    grid-template-columns: 1fr;
+  .user-access-section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .user-access-actions {
+    justify-content: stretch;
+  }
+
+  .user-summary-card-email,
+  .user-refresh-button {
+    max-width: none;
     width: 100%;
   }
 

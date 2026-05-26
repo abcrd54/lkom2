@@ -17,7 +17,14 @@ export function ConnectProviderButton({
   const className = secondary ? "button secondary" : "button";
 
   function handleClick() {
-    window.open(`/api/providers/${provider}/connect`, `${provider}-oauth`, POPUP_FEATURES);
+    const popupName =
+      provider === "microsoft" ? `${provider}-oauth-${Date.now()}` : `${provider}-oauth`;
+    const popupFeatures =
+      provider === "microsoft"
+        ? `${POPUP_FEATURES},noopener=yes,noreferrer=yes`
+        : POPUP_FEATURES;
+
+    window.open(`/api/providers/${provider}/connect`, popupName, popupFeatures);
   }
 
   return (

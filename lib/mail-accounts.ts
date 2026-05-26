@@ -1,4 +1,5 @@
 import type { MailAccountStatus, MailProvider } from "@/lib/types";
+import type { SubMailAccountView } from "@/lib/sub-mail-accounts";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 
@@ -16,6 +17,21 @@ export type MailAccountRecord = {
 
 type ConnectedUsersCountRow = {
   mail_account_id: string;
+  sub_mail_account_id: string | null;
+};
+
+type SubMailAccountRow = {
+  id: string;
+  mail_account_id: string;
+  label: string;
+  display_email: string;
+  max_users: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type MailAccountWithSubRows = MailAccountRecord & {
+  sub_mail_accounts?: SubMailAccountRow[] | null;
 };
 
 type SyncableMailAccountRow = {
@@ -38,17 +54,31 @@ export type SyncableMailAccount = {
   lastCheckedAt: string | null;
 };
 
+export type MailAccountView = {
+  id: string;
+  provider: MailProvider;
+  emailAddress: string;
+  status: MailAccountStatus;
+  lastSyncAt: string | null;
+  connectedUsers: number;
+  createdAt: string;
+  updatedAt: string;
+  subAccounts: SubMailAccountView[];
+};
+
 export async function listMailAccounts() {
   const supabase = createSupabaseAdminClient();
   const [{ data: accounts, error: accountsError }, { data: counts, error: countsError }] =
     await Promise.all([
       supabase
         .from("mail_accounts")
-        .select("id, provider, email_address, status, last_checked_at, created_at, updated_at")
+        .select(
+          "id, provider, email_address, status, last_checked_at, created_at, updated_at, sub_mail_accounts(id, mail_account_id, label, display_email, max_users, created_at, updated_at)"
+        )
         .order("created_at", { ascending: false }),
       supabase
         .from("users")
-        .select("mail_account_id")
+        .select("mail_account_id, sub_mail_account_id")
         .in("status", [...ACTIVE_STATUSES])
     ]);
 
@@ -60,28 +90,40 @@ export async function listMailAccounts() {
     throw countsError;
   }
 
-  const countMap = new Map(
-    Object.entries(
-      ((counts ?? []) as unknown as ConnectedUsersCountRow[]).reduce<Record<string, number>>(
-        (accumulator, row) => {
-          accumulator[row.mail_account_id] = (accumulator[row.mail_account_id] ?? 0) + 1;
-          return accumulator;
-        },
-        {}
-      )
-    )
-  );
+  const accountCountMap = new Map<string, number>();
+  const subAccountCountMap = new Map<string, number>();
 
-  return ((accounts ?? []) as MailAccountRecord[]).map((account) => ({
+  for (const row of (counts ?? []) as ConnectedUsersCountRow[]) {
+    accountCountMap.set(row.mail_account_id, (accountCountMap.get(row.mail_account_id) ?? 0) + 1);
+
+    if (row.sub_mail_account_id) {
+      subAccountCountMap.set(
+        row.sub_mail_account_id,
+        (subAccountCountMap.get(row.sub_mail_account_id) ?? 0) + 1
+      );
+    }
+  }
+
+  return ((accounts ?? []) as MailAccountWithSubRows[]).map((account) => ({
     id: account.id,
     provider: account.provider,
     emailAddress: account.email_address,
     status: account.status,
     lastSyncAt: account.last_checked_at,
-    connectedUsers: countMap.get(account.id) ?? 0,
+    connectedUsers: accountCountMap.get(account.id) ?? 0,
     createdAt: account.created_at,
-    updatedAt: account.updated_at
-  }));
+    updatedAt: account.updated_at,
+    subAccounts: (account.sub_mail_accounts ?? []).map((subAccount) => ({
+      id: subAccount.id,
+      mailAccountId: subAccount.mail_account_id,
+      label: subAccount.label,
+      displayEmail: subAccount.display_email,
+      maxUsers: subAccount.max_users,
+      connectedUsers: subAccountCountMap.get(subAccount.id) ?? 0,
+      createdAt: subAccount.created_at,
+      updatedAt: subAccount.updated_at
+    }))
+  })) satisfies MailAccountView[];
 }
 
 export async function getMailAccountSummary() {

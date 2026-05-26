@@ -98,6 +98,22 @@ function cleanOtpCandidate(value: string) {
   return value.replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
 
+function normalizeOtpCandidate(value: string) {
+  const cleaned = cleanOtpCandidate(value);
+
+  if (!cleaned) {
+    return cleaned;
+  }
+
+  // Some providers prepend short alpha tags to numeric OTPs, e.g. IS561283.
+  const wrappedDigitsMatch = cleaned.match(/^[A-Z]{1,3}(\d{4,8})[A-Z]{0,3}$/);
+  if (wrappedDigitsMatch?.[1]) {
+    return wrappedDigitsMatch[1];
+  }
+
+  return cleaned;
+}
+
 function isLikelyNonOtp(candidate: string) {
   if (!candidate) {
     return true;
@@ -153,7 +169,7 @@ function collectOtpCandidates(source: string, contextBoost: number) {
   const normalized = normalizeText(source);
 
   for (const match of normalized.matchAll(OTP_CONTEXT_REGEX)) {
-    const rawCandidate = typeof match[1] === "string" ? cleanOtpCandidate(match[1]) : "";
+    const rawCandidate = typeof match[1] === "string" ? normalizeOtpCandidate(match[1]) : "";
     if (rawCandidate.length < 4 || rawCandidate.length > 10) {
       continue;
     }
@@ -169,7 +185,7 @@ function collectOtpCandidates(source: string, contextBoost: number) {
   }
 
   for (const match of normalized.matchAll(OTP_DIGIT_REGEX)) {
-    const rawCandidate = cleanOtpCandidate(match[0]);
+    const rawCandidate = normalizeOtpCandidate(match[0]);
     candidates.push({
       code: rawCandidate,
       score: scoreOtpCandidate(rawCandidate, contextBoost)
@@ -177,7 +193,7 @@ function collectOtpCandidates(source: string, contextBoost: number) {
   }
 
   for (const match of normalized.toUpperCase().matchAll(OTP_ALNUM_REGEX)) {
-    const rawCandidate = cleanOtpCandidate(match[0]);
+    const rawCandidate = normalizeOtpCandidate(match[0]);
     if (/^\d+$/.test(rawCandidate)) {
       continue;
     }

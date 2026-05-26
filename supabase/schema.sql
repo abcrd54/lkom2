@@ -12,11 +12,23 @@ create table if not exists mail_accounts (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists sub_mail_accounts (
+  id uuid primary key default gen_random_uuid(),
+  mail_account_id uuid not null references mail_accounts(id) on delete cascade,
+  label text not null,
+  display_email text not null,
+  max_users integer not null default 3 check (max_users >= 1 and max_users <= 100),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (mail_account_id, display_email)
+);
+
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   phone_number text not null,
   mail_account_id uuid not null references mail_accounts(id) on delete restrict,
+  sub_mail_account_id uuid references sub_mail_accounts(id) on delete restrict,
   access_token_encrypted text not null,
   access_token_hash text not null unique,
   status text not null default 'active' check (status in ('active', 'disabled')),
@@ -76,7 +88,49 @@ create table if not exists redeem_code_users (
   unique (user_id)
 );
 
+alter table users
+add column if not exists sub_mail_account_id uuid;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'users_sub_mail_account_id_fkey'
+  ) then
+    alter table users
+    add constraint users_sub_mail_account_id_fkey
+    foreign key (sub_mail_account_id) references sub_mail_accounts(id) on delete restrict;
+  end if;
+end $$;
+
+insert into sub_mail_accounts (mail_account_id, label, display_email, max_users)
+select ma.id, 'Primary', ma.email_address, 3
+from mail_accounts ma
+where not exists (
+  select 1
+  from sub_mail_accounts sma
+  where sma.mail_account_id = ma.id
+    and sma.display_email = ma.email_address
+);
+
+update users
+set sub_mail_account_id = sma.id
+from sub_mail_accounts sma
+where users.sub_mail_account_id is null
+  and sma.mail_account_id = users.mail_account_id
+  and sma.display_email = (
+    select ma.email_address
+    from mail_accounts ma
+    where ma.id = users.mail_account_id
+  );
+
+alter table users
+alter column sub_mail_account_id set not null;
+
 create index if not exists idx_users_mail_account_id on users(mail_account_id);
+create index if not exists idx_users_sub_mail_account_id on users(sub_mail_account_id);
+create index if not exists idx_sub_mail_accounts_mail_account_id on sub_mail_accounts(mail_account_id);
 create index if not exists idx_otp_messages_mail_account_id_received_at on otp_messages(mail_account_id, received_at desc);
 create index if not exists idx_redeem_code_users_redeem_code_id on redeem_code_users(redeem_code_id);
 
@@ -93,6 +147,12 @@ $$;
 drop trigger if exists set_mail_accounts_updated_at on mail_accounts;
 create trigger set_mail_accounts_updated_at
 before update on mail_accounts
+for each row
+execute function set_updated_at();
+
+drop trigger if exists set_sub_mail_accounts_updated_at on sub_mail_accounts;
+create trigger set_sub_mail_accounts_updated_at
+before update on sub_mail_accounts
 for each row
 execute function set_updated_at();
 
@@ -114,13 +174,28 @@ before update on redeem_codes
 for each row
 execute function set_updated_at();
 
-create or replace function enforce_mail_account_user_limit()
+create or replace function enforce_user_sub_mail_account_constraints()
 returns trigger
 language plpgsql
 as $$
 declare
   active_user_count integer;
+  sub_account_max_users integer;
+  sub_account_mail_account_id uuid;
 begin
+  select mail_account_id, max_users
+  into sub_account_mail_account_id, sub_account_max_users
+  from sub_mail_accounts
+  where id = new.sub_mail_account_id;
+
+  if sub_account_mail_account_id is null then
+    raise exception 'sub mail account was not found';
+  end if;
+
+  if new.mail_account_id <> sub_account_mail_account_id then
+    raise exception 'sub mail account does not belong to the selected inbox';
+  end if;
+
   if new.status <> 'active' then
     return new;
   end if;
@@ -128,12 +203,12 @@ begin
   select count(*)
   into active_user_count
   from users
-  where mail_account_id = new.mail_account_id
+  where sub_mail_account_id = new.sub_mail_account_id
     and status = 'active'
     and id <> coalesce(new.id, '00000000-0000-0000-0000-000000000000'::uuid);
 
-  if active_user_count >= 3 then
-    raise exception 'mail account already has maximum 3 active users';
+  if active_user_count >= sub_account_max_users then
+    raise exception 'sub mail account already has maximum % active users', sub_account_max_users;
   end if;
 
   return new;
@@ -141,10 +216,11 @@ end;
 $$;
 
 drop trigger if exists trg_enforce_mail_account_user_limit on users;
-create trigger trg_enforce_mail_account_user_limit
+drop trigger if exists trg_enforce_user_sub_mail_account_constraints on users;
+create trigger trg_enforce_user_sub_mail_account_constraints
 before insert or update on users
 for each row
-execute function enforce_mail_account_user_limit();
+execute function enforce_user_sub_mail_account_constraints();
 
 create or replace function enforce_redeem_code_user_limit()
 returns trigger

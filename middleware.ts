@@ -11,6 +11,7 @@ const ADMIN_PROTECTED_PREFIXES = [
   "/whatsapp",
   "/api/admin",
   "/api/users",
+  "/api/sub-mail-accounts",
   "/api/redeem",
   "/api/providers",
   "/api/whatsapp"

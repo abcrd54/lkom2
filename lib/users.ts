@@ -1,13 +1,13 @@
 import { decryptAccessToken, encryptAccessToken, generateAccessToken, hashAccessToken } from "@/lib/access-links";
-import { getMailAccountById } from "@/lib/mail-accounts";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getSubMailAccountById } from "@/lib/sub-mail-accounts";
 import type { MailProvider, UserStatus } from "@/lib/types";
 import { z } from "zod";
 
 const baseUserSchema = z.object({
   name: z.string().trim().min(2).max(120),
   phoneNumber: z.string().trim().min(8).max(30),
-  mailAccountId: z.string().uuid()
+  subMailAccountId: z.string().uuid()
 });
 
 export const createUserSchema = baseUserSchema;
@@ -35,6 +35,7 @@ type UserRow = {
   name: string;
   phone_number: string;
   mail_account_id: string;
+  sub_mail_account_id: string;
   access_token_encrypted: string;
   status: UserStatus;
   link_disabled_at: string | null;
@@ -52,9 +53,29 @@ type UserRow = {
         status: string;
       }>
     | null;
+  sub_mail_accounts?:
+    | {
+        label: string;
+        display_email: string;
+        max_users: number;
+      }
+    | Array<{
+        label: string;
+        display_email: string;
+        max_users: number;
+      }>
+    | null;
 };
 
 function extractMailAccountRelation(relation: UserRow["mail_accounts"]) {
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation ?? null;
+}
+
+function extractSubMailAccountRelation(relation: UserRow["sub_mail_accounts"]) {
   if (Array.isArray(relation)) {
     return relation[0] ?? null;
   }
@@ -68,8 +89,11 @@ export type UserView = {
   phoneNumber: string;
   status: UserStatus;
   mailAccountId: string;
+  subMailAccountId: string;
+  subMailAccountLabel: string;
   provider: MailProvider;
   inboxAddress: string;
+  sourceInboxAddress: string;
   inboxStatus: string;
   linkDisabledAt: string | null;
   accessToken: string;
@@ -87,7 +111,8 @@ export type PaginatedUsersResult = {
 
 function mapUserRow(row: UserRow): UserView {
   const accessToken = decryptAccessToken(row.access_token_encrypted);
-  const relation = extractMailAccountRelation(row.mail_accounts);
+  const mailAccount = extractMailAccountRelation(row.mail_accounts);
+  const subMailAccount = extractSubMailAccountRelation(row.sub_mail_accounts);
 
   return {
     id: row.id,
@@ -95,9 +120,12 @@ function mapUserRow(row: UserRow): UserView {
     phoneNumber: row.phone_number,
     status: row.status,
     mailAccountId: row.mail_account_id,
-    provider: relation?.provider ?? "google",
-    inboxAddress: relation?.email_address ?? "",
-    inboxStatus: relation?.status ?? "active",
+    subMailAccountId: row.sub_mail_account_id,
+    subMailAccountLabel: subMailAccount?.label ?? "Primary",
+    provider: mailAccount?.provider ?? "google",
+    inboxAddress: subMailAccount?.display_email ?? mailAccount?.email_address ?? "",
+    sourceInboxAddress: mailAccount?.email_address ?? "",
+    inboxStatus: mailAccount?.status ?? "active",
     linkDisabledAt: row.link_disabled_at,
     accessToken,
     createdAt: row.created_at,
@@ -119,18 +147,14 @@ function normalizePhoneNumber(phoneNumber: string) {
   return digitsOnly;
 }
 
-async function assertAssignableMailAccount(mailAccountId: string) {
-  const account = await getMailAccountById(mailAccountId);
+async function assertAssignableSubMailAccount(subMailAccountId: string) {
+  const subMailAccount = await getSubMailAccountById(subMailAccountId);
 
-  if (!account) {
-    throw new Error("Selected inbox was not found.");
+  if (!subMailAccount) {
+    throw new Error("Selected sub account was not found.");
   }
 
-  if (account.status === "disabled") {
-    throw new Error("Selected inbox is disabled.");
-  }
-
-  return account;
+  return subMailAccount;
 }
 
 export async function listUsers() {
@@ -148,7 +172,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
     supabase
       .from("users")
       .select(
-        "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+        "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
       )
       .order("created_at", { ascending: false })
       .range(from, to),
@@ -175,7 +199,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
 }
 
 export async function createUser(input: z.infer<typeof createUserSchema>) {
-  await assertAssignableMailAccount(input.mailAccountId);
+  const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
 
   const supabase = createSupabaseAdminClient();
@@ -188,14 +212,15 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
     .insert({
       name: input.name,
       phone_number: normalizedPhoneNumber,
-      mail_account_id: input.mailAccountId,
+      mail_account_id: subMailAccount.mailAccountId,
+      sub_mail_account_id: subMailAccount.id,
       access_token_encrypted: accessTokenEncrypted,
       access_token_hash: accessTokenHash,
       status: "active",
       link_disabled_at: null
     })
     .select(
-      "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -207,7 +232,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
 }
 
 export async function updateUser(input: z.infer<typeof updateUserSchema>) {
-  await assertAssignableMailAccount(input.mailAccountId);
+  const subMailAccount = await assertAssignableSubMailAccount(input.subMailAccountId);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
 
   const supabase = createSupabaseAdminClient();
@@ -215,12 +240,14 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
     name: string;
     phone_number: string;
     mail_account_id: string;
+    sub_mail_account_id: string;
     status?: UserStatus;
     link_disabled_at?: string | null;
   } = {
     name: input.name,
     phone_number: normalizedPhoneNumber,
-    mail_account_id: input.mailAccountId
+    mail_account_id: subMailAccount.mailAccountId,
+    sub_mail_account_id: subMailAccount.id
   };
 
   if (input.status) {
@@ -233,7 +260,7 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
     .update(payload)
     .eq("id", input.userId)
     .select(
-      "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -256,7 +283,7 @@ export async function setUserDisabled(input: z.infer<typeof disableUserSchema>) 
     })
     .eq("id", input.userId)
     .select(
-      "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -292,7 +319,7 @@ export async function regenerateUserAccessLink(input: z.infer<typeof regenerateL
     })
     .eq("id", input.userId)
     .select(
-      "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -308,7 +335,7 @@ export async function getUserByAccessToken(token: string) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status)"
+      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .eq("access_token_hash", hashAccessToken(token))
     .maybeSingle();

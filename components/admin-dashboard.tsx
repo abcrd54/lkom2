@@ -21,6 +21,16 @@ type MailAccountView = {
   lastSyncAt: string | null;
   createdAt: string;
   updatedAt: string;
+  subAccounts: Array<{
+    id: string;
+    mailAccountId: string;
+    label: string;
+    displayEmail: string;
+    maxUsers: number;
+    connectedUsers: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 type UserView = {
@@ -29,8 +39,11 @@ type UserView = {
   phoneNumber: string;
   status: UserStatus;
   mailAccountId: string;
+  subMailAccountId: string;
+  subMailAccountLabel: string;
   provider: MailProvider;
   inboxAddress: string;
+  sourceInboxAddress: string;
   inboxStatus: string;
   linkDisabledAt: string | null;
   accessToken: string;
@@ -321,7 +334,7 @@ function OverviewSection(props: Pick<AdminDashboardProps, "stats" | "mailAccount
                           {account.status}
                         </span>
                       </td>
-                      <td>{account.connectedUsers}/3</td>
+                      <td>{account.connectedUsers} active</td>
                     </tr>
                   ))
                 ) : (
@@ -421,6 +434,90 @@ function ConnectMailSection({
   compact?: boolean;
   fullWidth?: boolean;
 }) {
+  const router = useRouter();
+  const [isSubModalOpen, setIsSubModalOpen] = useState(false);
+  const [selectedMailAccountId, setSelectedMailAccountId] = useState("");
+  const [subLabel, setSubLabel] = useState("");
+  const [subDisplayEmail, setSubDisplayEmail] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const googleAccounts = mailAccounts.filter(
+    (account) => account.provider === "google" && account.status !== "disabled"
+  );
+
+  function resetSubForm() {
+    setSelectedMailAccountId("");
+    setSubLabel("");
+    setSubDisplayEmail("");
+    setErrorMessage(null);
+    setFeedback(null);
+    setIsSubmitting(false);
+  }
+
+  function openSubModal() {
+    resetSubForm();
+    setIsSubModalOpen(true);
+  }
+
+  function closeSubModal() {
+    setIsSubModalOpen(false);
+    resetSubForm();
+  }
+
+  async function handleCreateSubMail(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/sub-mail-accounts/create", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          mailAccountId: selectedMailAccountId,
+          label: subLabel,
+          displayEmail: subDisplayEmail,
+          maxUsers: 3
+        })
+      });
+
+      const payload = (await response.json()) as
+        | {
+            ok: true;
+            data: {
+              subMailAccount: {
+                label: string;
+                displayEmail: string;
+              };
+            };
+          }
+        | {
+            ok: false;
+            error?: string;
+          };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? "Failed to create sub account." : payload.error ?? "Failed to create sub account.");
+      }
+
+      setFeedback(
+        `Sub-Gmail created: ${payload.data.subMailAccount.label} (${payload.data.subMailAccount.displayEmail})`
+      );
+      setSubLabel("");
+      setSubDisplayEmail("");
+      setSelectedMailAccountId("");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to create sub account.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <section className={cn("card", compact && "overview-card", fullWidth && "card-span-full")}>
       <div className="card-header">
@@ -431,6 +528,14 @@ function ConnectMailSection({
         <div className="button-row">
           <ConnectProviderButton provider="google" label="Connect Google" />
           <ConnectProviderButton provider="microsoft" label="Connect Microsoft" secondary />
+          <button
+            className="button secondary"
+            disabled={googleAccounts.length === 0}
+            onClick={openSubModal}
+            type="button"
+          >
+            Add Sub-Gmail
+          </button>
         </div>
       </div>
 
@@ -442,6 +547,7 @@ function ConnectMailSection({
               <th>Inbox</th>
               <th>Status</th>
               <th>User Connected</th>
+              <th>Sub-Gmail</th>
               <th>Last Sync</th>
             </tr>
           </thead>
@@ -461,22 +567,112 @@ function ConnectMailSection({
                             ? "warning"
                             : "neutral"
                       )}
-                    >
-                      {account.status}
-                    </span>
+                        >
+                          {account.status}
+                        </span>
+                      </td>
+                  <td>{account.connectedUsers} active</td>
+                  <td>
+                    {account.subAccounts.length > 0 ? (
+                      <div className="log-recipient-list">
+                        {account.subAccounts.map((subAccount) => (
+                          <span key={subAccount.id}>
+                            {subAccount.label}: {subAccount.displayEmail} ({subAccount.connectedUsers}/
+                            {subAccount.maxUsers})
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="micro">No sub accounts</span>
+                    )}
                   </td>
-                  <td>{account.connectedUsers}/3</td>
                   <td>{formatDateTime(account.lastSyncAt)}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={5}>No inbox connected yet.</td>
+                <td colSpan={6}>No inbox connected yet.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {isSubModalOpen ? (
+        <div className="modal-backdrop" onClick={closeSubModal} role="presentation">
+          <div
+            className="modal-card"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-head">
+              <div>
+                <h3>Add Sub-Gmail</h3>
+                <p>Create one logical Gmail slot with its own 3-user capacity.</p>
+              </div>
+              <button className="modal-close" onClick={closeSubModal} type="button">
+                Close
+              </button>
+            </div>
+
+            <form className="form-grid modal-form" onSubmit={handleCreateSubMail}>
+              <div className="field">
+                <label htmlFor="sub-gmail-parent">Google inbox</label>
+                <select
+                  id="sub-gmail-parent"
+                  value={selectedMailAccountId}
+                  onChange={(event) => setSelectedMailAccountId(event.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    Select parent Gmail
+                  </option>
+                  {googleAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.emailAddress}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="sub-gmail-label">Label</label>
+                <input
+                  id="sub-gmail-label"
+                  placeholder="Alias B"
+                  value={subLabel}
+                  onChange={(event) => setSubLabel(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="sub-gmail-email">Display email</label>
+                <input
+                  id="sub-gmail-email"
+                  placeholder="aboutlko.m@gmail.com"
+                  value={subDisplayEmail}
+                  onChange={(event) => setSubDisplayEmail(event.target.value)}
+                  required
+                />
+              </div>
+              {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
+              {feedback ? (
+                <div className="form-feedback success-block">
+                  <p className="success-title">{feedback}</p>
+                </div>
+              ) : null}
+              <div className="button-row">
+                <button className="button" disabled={isSubmitting} type="submit">
+                  {isSubmitting ? "Saving..." : "Create Sub-Gmail"}
+                </button>
+                <button className="button secondary" onClick={closeSubModal} type="button">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -497,7 +693,7 @@ function ManageUserSection({
   const [userSearch, setUserSearch] = useState(users?.searchQuery ?? "");
   const [name, setName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [mailAccountId, setMailAccountId] = useState("");
+  const [subMailAccountId, setSubMailAccountId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -513,8 +709,18 @@ function ManageUserSection({
   } | null>(null);
 
   const activeMailAccounts = mailAccounts.filter((account) => account.status !== "disabled");
-  const inboxIdByEmail = new Map(
-    activeMailAccounts.map((account) => [account.emailAddress.trim().toLowerCase(), account.id])
+  const selectableSubAccounts = activeMailAccounts.flatMap((account) =>
+    account.subAccounts.map((subAccount) => ({
+      ...subAccount,
+      provider: account.provider,
+      sourceInboxAddress: account.emailAddress
+    }))
+  );
+  const subAccountIdByEmail = new Map(
+    selectableSubAccounts.map((subAccount) => [
+      subAccount.displayEmail.trim().toLowerCase(),
+      subAccount.id
+    ])
   );
   const [copiedAccessUserId, setCopiedAccessUserId] = useState<string | null>(null);
   const filteredUsers =
@@ -534,7 +740,7 @@ function ManageUserSection({
   function resetSingleFormState() {
     setName("");
     setPhoneNumber("");
-    setMailAccountId("");
+    setSubMailAccountId("");
     setErrorMessage(null);
     setSuccessMessage(null);
     setCreatedAccessLink(null);
@@ -679,7 +885,7 @@ function ManageUserSection({
         body: JSON.stringify({
           name,
           phoneNumber,
-          mailAccountId
+          subMailAccountId
         })
       });
 
@@ -704,7 +910,7 @@ function ManageUserSection({
       setCreatedAccessLink(payload.data.accessLink);
       setName("");
       setPhoneNumber("");
-      setMailAccountId("");
+      setSubMailAccountId("");
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to create user.");
@@ -729,12 +935,12 @@ function ManageUserSection({
     try {
       for (const [index, row] of bulkRows.entries()) {
         setBulkProgress(`Importing ${index + 1} of ${bulkRows.length}...`);
-        const mailAccountIdForRow = inboxIdByEmail.get(row.inboxEmail.trim().toLowerCase());
+        const subMailAccountIdForRow = subAccountIdByEmail.get(row.inboxEmail.trim().toLowerCase());
 
-        if (!mailAccountIdForRow) {
+        if (!subMailAccountIdForRow) {
           failed.push({
             row: index + 2,
-            reason: `Inbox not found or disabled: ${row.inboxEmail}`
+            reason: `Sub account not found or disabled: ${row.inboxEmail}`
           });
           continue;
         }
@@ -748,7 +954,7 @@ function ManageUserSection({
             body: JSON.stringify({
               name: row.name,
               phoneNumber: row.phoneNumber,
-              mailAccountId: mailAccountIdForRow
+              subMailAccountId: subMailAccountIdForRow
             })
           });
 
@@ -790,7 +996,7 @@ function ManageUserSection({
       <div className="card-header">
         <div>
           <h3>Manage User</h3>
-          <p>Create users and assign active inboxes.</p>
+          <p>Create users and assign active sub accounts.</p>
         </div>
         <div className="button-row">
           <button className="button" onClick={openSingleModal} type="button">
@@ -833,7 +1039,16 @@ function ManageUserSection({
                   <td>{user.name}</td>
                   <td>{user.phoneNumber}</td>
                   <td>{providerLabel(user.provider)}</td>
-                  <td>{user.inboxAddress}</td>
+                  <td>
+                    <div className="log-recipient-list">
+                      <span>
+                        {user.subMailAccountLabel}: {user.inboxAddress}
+                      </span>
+                      {user.sourceInboxAddress !== user.inboxAddress ? (
+                        <span>Source inbox: {user.sourceInboxAddress}</span>
+                      ) : null}
+                    </div>
+                  </td>
                   <td>
                     <span className={cn("badge", user.status === "active" ? "success" : "warning")}>
                       {user.status}
@@ -889,7 +1104,7 @@ function ManageUserSection({
                 <h3>{modalMode === "single" ? "Add User" : "Bulk Import"}</h3>
                 <p>
                   {modalMode === "single"
-                    ? "Create one user and generate a dedicated access link."
+                    ? "Create one user and assign it to a dedicated sub account."
                     : "Upload CSV, XLS, or XLSX using the import template headers."}
                 </p>
               </div>
@@ -923,21 +1138,21 @@ function ManageUserSection({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="modal-inbox">Inbox</label>
+                  <label htmlFor="modal-inbox">Sub account</label>
                   <select
                     id="modal-inbox"
                     name="inbox"
-                    value={mailAccountId}
-                    onChange={(event) => setMailAccountId(event.target.value)}
+                    value={subMailAccountId}
+                    onChange={(event) => setSubMailAccountId(event.target.value)}
                     required
                   >
                     <option value="" disabled>
-                      Select active inbox
+                      Select active sub account
                     </option>
-                    {activeMailAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {providerLabel(account.provider)} | {account.emailAddress} ({account.connectedUsers}
-                        /3 used)
+                    {selectableSubAccounts.map((subAccount) => (
+                      <option key={subAccount.id} value={subAccount.id}>
+                        {providerLabel(subAccount.provider)} | {subAccount.label} |{" "}
+                        {subAccount.displayEmail} ({subAccount.connectedUsers}/{subAccount.maxUsers} used)
                       </option>
                     ))}
                   </select>
@@ -978,9 +1193,10 @@ function ManageUserSection({
                   Template headers:
                   <code>name,phoneNumber,inboxEmail</code>
                 </div>
+                <p className="micro">Use `inboxEmail` from the Sub-Gmail display email list.</p>
                 {bulkFileName ? (
                   <p className="micro">
-                    {bulkFileName} · {bulkRows.length} row(s) ready
+                    {bulkFileName} | {bulkRows.length} row(s) ready
                   </p>
                 ) : null}
                 {bulkProgress ? <p className="micro">{bulkProgress}</p> : null}
@@ -1033,6 +1249,8 @@ function WhatsappSection({
   const router = useRouter();
   const [templateName, setTemplateName] = useState("");
   const [templateMessage, setTemplateMessage] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [recipientSearch, setRecipientSearch] = useState("");
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
@@ -1040,6 +1258,8 @@ function WhatsappSection({
   const [isSendingWhatsapp, setIsSendingWhatsapp] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sendFeedback, setSendFeedback] = useState<string | null>(null);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
 
   const filteredRecipients = recipients.filter((recipient) => {
     const query = recipientSearch.trim().toLowerCase();
@@ -1057,6 +1277,12 @@ function WhatsappSection({
   const selectedRecipients = recipients.filter((recipient) =>
     selectedRecipientIds.includes(recipient.id)
   );
+
+  function resetTemplateForm() {
+    setTemplateName("");
+    setTemplateMessage("");
+    setEditingTemplateId(null);
+  }
 
   function renderWhatsappTemplatePreview(
     message: string,
@@ -1092,7 +1318,19 @@ function WhatsappSection({
     });
   }
 
-  async function handleCreateTemplate(event: React.FormEvent<HTMLFormElement>) {
+  function handleEditTemplate(template: {
+    id: string;
+    name: string;
+    message: string;
+  }) {
+    setEditingTemplateId(template.id);
+    setTemplateName(template.name);
+    setTemplateMessage(template.message);
+    setErrorMessage(null);
+    setFeedback(null);
+  }
+
+  async function handleSaveTemplate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSavingTemplate(true);
     setErrorMessage(null);
@@ -1100,11 +1338,12 @@ function WhatsappSection({
 
     try {
       const response = await fetch("/api/whatsapp/templates", {
-        method: "POST",
+        method: editingTemplateId ? "PUT" : "POST",
         headers: {
           "content-type": "application/json"
         },
         body: JSON.stringify({
+          templateId: editingTemplateId,
           name: templateName,
           message: templateMessage
         })
@@ -1115,9 +1354,12 @@ function WhatsappSection({
         throw new Error(payload?.error ?? "Failed to save WhatsApp template.");
       }
 
-      setFeedback(`Template saved: ${payload.data.template.name}`);
-      setTemplateName("");
-      setTemplateMessage("");
+      setFeedback(
+        editingTemplateId
+          ? `Template updated: ${payload.data.template.name}`
+          : `Template saved: ${payload.data.template.name}`
+      );
+      resetTemplateForm();
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to save WhatsApp template.");
@@ -1126,10 +1368,50 @@ function WhatsappSection({
     }
   }
 
-  async function handleSendWhatsapp() {
-    setIsSendingWhatsapp(true);
+  async function handleDeleteTemplate(templateId: string) {
+    setDeletingTemplateId(templateId);
     setErrorMessage(null);
     setFeedback(null);
+
+    try {
+      const response = await fetch("/api/whatsapp/templates", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          templateId
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to delete WhatsApp template.");
+      }
+
+      if (selectedTemplateId === templateId) {
+        setSelectedTemplateId("");
+      }
+
+      if (editingTemplateId === templateId) {
+        resetTemplateForm();
+      }
+
+      setFeedback("Template deleted.");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Failed to delete WhatsApp template."
+      );
+    } finally {
+      setDeletingTemplateId(null);
+    }
+  }
+
+  async function handleSendWhatsapp() {
+    setIsSendingWhatsapp(true);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
 
     try {
       const response = await fetch("/api/whatsapp/send", {
@@ -1148,11 +1430,13 @@ function WhatsappSection({
         throw new Error(payload?.error ?? "Failed to send WhatsApp message.");
       }
 
-      setFeedback(payload.data.detail ?? "WhatsApp message queued.");
+      setSendFeedback(payload.data.detail ?? "WhatsApp message queued.");
       setSelectedRecipientIds([]);
       router.refresh();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to send WhatsApp message.");
+      setSendErrorMessage(
+        error instanceof Error ? error.message : "Failed to send WhatsApp message."
+      );
     } finally {
       setIsSendingWhatsapp(false);
     }
@@ -1167,7 +1451,7 @@ function WhatsappSection({
             <p>Create reusable WhatsApp message templates.</p>
           </div>
         </div>
-        <form className="form-grid admin-form" onSubmit={handleCreateTemplate}>
+        <form className="form-grid admin-form" onSubmit={handleSaveTemplate}>
           <div className="field">
             <label htmlFor="wa-template-name">Template name</label>
             <input
@@ -1198,10 +1482,65 @@ function WhatsappSection({
             <code>{`{code}`}</code>
             <code>{`{redeem_link}`}</code>
           </div>
+          {templates.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table adminlte-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Updated</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {templates.map((template) => (
+                    <tr key={template.id}>
+                      <td>{template.name}</td>
+                      <td>{formatDateTime(template.updatedAt)}</td>
+                      <td>
+                        <div className="button-row">
+                          <button
+                            className="button secondary"
+                            onClick={() => handleEditTemplate(template)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="button secondary"
+                            disabled={deletingTemplateId === template.id}
+                            onClick={() => handleDeleteTemplate(template.id)}
+                            type="button"
+                          >
+                            {deletingTemplateId === template.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
+          {feedback ? (
+            <div className="form-feedback success-block">
+              <p className="success-title">{feedback}</p>
+            </div>
+          ) : null}
           <div className="button-row toolbar-row">
             <button className="button" disabled={isSavingTemplate} type="submit">
-              {isSavingTemplate ? "Saving..." : "Save Template"}
+              {isSavingTemplate
+                ? "Saving..."
+                : editingTemplateId
+                  ? "Update Template"
+                  : "Save Template"}
             </button>
+            {editingTemplateId ? (
+              <button className="button secondary" onClick={resetTemplateForm} type="button">
+                Cancel Edit
+              </button>
+            ) : null}
           </div>
         </form>
       </section>
@@ -1240,7 +1579,7 @@ function WhatsappSection({
                   (recipient) => (
                     <article className="template-preview-card" key={recipient.id}>
                       <p className="micro">
-                        {recipient.name} · {recipient.phoneNumber}
+                        {recipient.name} | {recipient.phoneNumber}
                       </p>
                       <pre className="template-preview-message">
                         {renderWhatsappTemplatePreview(selectedTemplate.message, recipient)}
@@ -1282,10 +1621,10 @@ function WhatsappSection({
               </label>
             ))}
           </div>
-          {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
-          {feedback ? (
+          {sendErrorMessage ? <p className="form-feedback error">{sendErrorMessage}</p> : null}
+          {sendFeedback ? (
             <div className="form-feedback success-block">
-              <p className="success-title">{feedback}</p>
+              <p className="success-title">{sendFeedback}</p>
             </div>
           ) : null}
           <div className="button-row toolbar-row">

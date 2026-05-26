@@ -12,6 +12,14 @@ export const createWhatsappTemplateSchema = z.object({
   message: z.string().trim().min(1).max(60000)
 });
 
+export const updateWhatsappTemplateSchema = createWhatsappTemplateSchema.extend({
+  templateId: z.string().uuid()
+});
+
+export const deleteWhatsappTemplateSchema = z.object({
+  templateId: z.string().uuid()
+});
+
 export const sendWhatsappSchema = z.object({
   templateId: z.string().uuid(),
   recipientUserIds: z.array(z.string().uuid()).min(1).max(10)
@@ -59,6 +67,14 @@ type RecipientRow = {
         email_address: string;
       }>
     | null;
+  sub_mail_accounts?:
+    | {
+        display_email: string;
+      }
+    | Array<{
+        display_email: string;
+      }>
+    | null;
   redeem_code_users?:
     | Array<{
         assigned_at: string;
@@ -77,6 +93,14 @@ type RecipientRow = {
 function getInboxEmail(relation: RecipientRow["mail_accounts"]): string {
   const mailAccount = Array.isArray(relation) ? (relation[0] ?? null) : relation ?? null;
   return mailAccount?.email_address ?? "";
+}
+
+function getDisplayEmail(row: RecipientRow): string {
+  const subMailAccount = Array.isArray(row.sub_mail_accounts)
+    ? (row.sub_mail_accounts[0] ?? null)
+    : row.sub_mail_accounts ?? null;
+
+  return subMailAccount?.display_email ?? getInboxEmail(row.mail_accounts);
 }
 
 function getLatestRedeemCode(
@@ -141,6 +165,46 @@ export async function createWhatsappTemplate(input: z.infer<typeof createWhatsap
   };
 }
 
+export async function updateWhatsappTemplate(input: z.infer<typeof updateWhatsappTemplateSchema>) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("whatsapp_templates")
+    .update({
+      name: input.name,
+      message: input.message
+    })
+    .eq("id", input.templateId)
+    .select("id, name, message, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const row = data as WhatsappTemplateRow;
+  return {
+    id: row.id,
+    name: row.name,
+    message: row.message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export async function deleteWhatsappTemplate(input: z.infer<typeof deleteWhatsappTemplateSchema>) {
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase
+    .from("whatsapp_templates")
+    .delete()
+    .eq("id", input.templateId);
+
+  if (error) {
+    throw error;
+  }
+
+  return { deleted: true };
+}
+
 export async function listWhatsappLogs(limit = 50) {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
@@ -174,7 +238,7 @@ export async function listWhatsappRecipients() {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), redeem_code_users(assigned_at, redeem_codes(code))"
+      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), sub_mail_accounts(display_email), redeem_code_users(assigned_at, redeem_codes(code))"
     )
     .eq("status", "active")
     .order("created_at", { ascending: false })
@@ -191,7 +255,7 @@ export async function listWhatsappRecipients() {
     name: row.name,
     phoneNumber: row.phone_number,
     status: row.status,
-    email: getInboxEmail(row.mail_accounts),
+    email: getDisplayEmail(row),
     accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
     redeemCode: getLatestRedeemCode(row.redeem_code_users),
     redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
@@ -218,7 +282,7 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), redeem_code_users(assigned_at, redeem_codes(code))"
+      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), sub_mail_accounts(display_email), redeem_code_users(assigned_at, redeem_codes(code))"
     )
     .in("id", recipientUserIds)
     .eq("status", "active");
@@ -233,7 +297,7 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
     id: row.id,
     name: row.name,
     phoneNumber: row.phone_number,
-    email: getInboxEmail(row.mail_accounts),
+    email: getDisplayEmail(row),
     accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
     redeemCode: getLatestRedeemCode(row.redeem_code_users),
     redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
@@ -285,11 +349,7 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
 
   const payload = await response.json();
   const isSuccess = response.ok && payload?.status === true;
-  const status: "queued" | "failed" | "partial" | "sent" = isSuccess
-    ? payload?.process === "pending"
-      ? "queued"
-      : "sent"
-    : "failed";
+  const status: "queued" | "failed" | "partial" | "sent" = isSuccess ? "sent" : "failed";
 
   const supabase = createSupabaseAdminClient();
   const { data: logRow, error: logError } = await supabase

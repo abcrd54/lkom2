@@ -83,6 +83,8 @@ export async function createOAuthAuthorizationUrl(provider: MailProvider) {
   if (provider === "google") {
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
+  } else {
+    url.searchParams.set("prompt", "select_account");
   }
 
   return url.toString();

@@ -66,6 +66,7 @@ type UserAccessApiPayload =
 
 export function UserAccessPage({ accessToken, user, messages }: UserAccessPageProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [liveMessages, setLiveMessages] = useState(messages);
@@ -170,6 +171,19 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
     }
   }
 
+  async function handleCopyEmail() {
+    try {
+      await navigator.clipboard.writeText(user?.inboxAddress ?? "");
+      setCopiedEmail(true);
+      showToast("Email copied");
+      window.setTimeout(() => {
+        setCopiedEmail(false);
+      }, 1800);
+    } catch {
+      setCopiedEmail(false);
+    }
+  }
+
   async function handleRefresh() {
     setIsRefreshing(true);
 
@@ -218,28 +232,44 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
           </p>
           <p className="user-access-status">{formatUpdatedAgo()}</p>
         </div>
-
-        <div className="user-access-summary">
-          <div className="user-summary-card">
-            <span className="user-summary-label">Inbox</span>
-            <strong>{user.inboxAddress}</strong>
-          </div>
-          <div className="user-summary-card">
-            <span className="user-summary-label">Messages</span>
-            <strong>{liveMessages.length}</strong>
-          </div>
-        </div>
       </div>
 
       <div className="user-access-card">
         <div className="user-access-section-head">
           <div>
             <h2>Latest OTP</h2>
-            <p>Recent codes received for this inbox.</p>
+            <p>Recent codes received for this email.</p>
           </div>
-          <button className="button secondary" onClick={handleRefresh} type="button">
-            {isRefreshing ? "Refreshing..." : "Refresh"}
-          </button>
+          <div className="user-access-actions">
+            <div className="user-summary-card user-summary-card-email">
+              <div className="user-summary-card-head">
+                <span className="user-summary-label">Email</span>
+                <button
+                  aria-label={copiedEmail ? "Email copied" : "Copy email"}
+                  className="user-copy-icon-button"
+                  onClick={handleCopyEmail}
+                  type="button"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M9 9.75C9 8.50736 10.0074 7.5 11.25 7.5H18C19.2426 7.5 20.25 8.50736 20.25 9.75V18C20.25 19.2426 19.2426 20.25 18 20.25H11.25C10.0074 20.25 9 19.2426 9 18V9.75Z"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    />
+                    <path
+                      d="M5.25 15.75C4.00736 15.75 3 14.7426 3 13.5V5.25C3 4.00736 4.00736 3 5.25 3H13.5C14.7426 3 15.75 4.00736 15.75 5.25"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <strong>{user.inboxAddress}</strong>
+            </div>
+            <button className="button secondary user-refresh-button" onClick={handleRefresh} type="button">
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         <div className="user-otp-grid">
