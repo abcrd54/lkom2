@@ -463,6 +463,11 @@ textarea {
   font-weight: 700;
 }
 
+.bulk-failed-list {
+  display: grid;
+  gap: 6px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -475,7 +480,8 @@ textarea {
 }
 
 .field input,
-.field select {
+.field select,
+.admin-textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 0.35rem;
@@ -483,6 +489,11 @@ textarea {
   padding: 10px 12px;
   color: var(--foreground);
   font-size: 14px;
+}
+
+.admin-textarea {
+  min-height: 140px;
+  resize: vertical;
 }
 
 .button-row {
@@ -511,6 +522,200 @@ textarea {
   background: white;
   color: var(--foreground);
   border: 1px solid var(--line);
+}
+
+.mini-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--foreground);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.toolbar-inline {
+  padding: 18px 18px 0;
+}
+
+.search-field {
+  min-width: min(100%, 320px);
+}
+
+.access-link-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: white;
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-head h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.modal-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal-close {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: white;
+  color: var(--foreground);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.modal-form {
+  padding: 20px 22px 22px;
+}
+
+.import-template-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.import-template-note code {
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--foreground);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.template-preview-block {
+  display: grid;
+  gap: 12px;
+}
+
+.template-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.template-preview-head strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.template-preview-grid {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.template-preview-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: white;
+}
+
+.template-preview-message {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+.recipient-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recipient-list {
+  display: grid;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 4px 2px;
+}
+
+.recipient-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: white;
+}
+
+.recipient-item span {
+  display: grid;
+  gap: 4px;
+}
+
+.recipient-item strong {
+  font-size: 13px;
+}
+
+.recipient-item small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log-recipient-list {
+  display: grid;
+  gap: 4px;
 }
 
 .table-wrap {
@@ -682,6 +887,14 @@ textarea {
   line-height: 1.7;
 }
 
+.user-access-status {
+  margin: 12px 0 0;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .user-access-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -806,6 +1019,26 @@ textarea {
   font-size: 13px;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.user-otp-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.copy-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 80;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #111827;
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.28);
 }
 
 .pagination-bar {

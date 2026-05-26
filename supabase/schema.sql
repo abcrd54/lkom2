@@ -39,6 +39,27 @@ create table if not exists otp_messages (
   unique (mail_account_id, provider_message_id)
 );
 
+create table if not exists whatsapp_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  message text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists whatsapp_logs (
+  id uuid primary key default gen_random_uuid(),
+  template_id uuid references whatsapp_templates(id) on delete set null,
+  template_name text not null,
+  message text not null,
+  recipients jsonb not null default '[]'::jsonb,
+  recipient_count integer not null default 0,
+  status text not null check (status in ('queued', 'sent', 'failed', 'partial')),
+  provider_request_id text,
+  provider_response jsonb,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_users_mail_account_id on users(mail_account_id);
 create index if not exists idx_otp_messages_mail_account_id_received_at on otp_messages(mail_account_id, received_at desc);
 
@@ -61,6 +82,12 @@ execute function set_updated_at();
 drop trigger if exists set_users_updated_at on users;
 create trigger set_users_updated_at
 before update on users
+for each row
+execute function set_updated_at();
+
+drop trigger if exists set_whatsapp_templates_updated_at on whatsapp_templates;
+create trigger set_whatsapp_templates_updated_at
+before update on whatsapp_templates
 for each row
 execute function set_updated_at();
 

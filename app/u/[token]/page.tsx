@@ -20,6 +20,7 @@ export default async function UserAccessRoute({ params }: UserAccessRouteProps) 
   return (
     <PageShell>
       <UserAccessPage
+        accessToken={token}
         user={
           user
             ? {

@@ -53,8 +53,10 @@ type SyncResult = {
   error?: string;
 };
 
-const OTP_CONTEXT_REGEX = /(?:otp|code|kode|pin|password|verification|verify)[^a-z0-9]{0,24}([a-z0-9-]{4,10})/i;
+const OTP_CONTEXT_REGEX =
+  /(?:otp|one[\s-]?time password|verification code|verification|verify|security code|passcode|pin|kode verifikasi|kode otp|kode|code)[^a-z0-9]{0,24}([a-z0-9][a-z0-9\s-]{3,11})/gi;
 const OTP_DIGIT_REGEX = /\b\d{4,8}\b/g;
+const OTP_ALNUM_REGEX = /\b[A-Z0-9]{4,10}\b/g;
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -79,20 +81,101 @@ function normalizeText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function extractOtpCode(input: string) {
-  const normalized = normalizeText(input);
+function cleanOtpCandidate(value: string) {
+  return value.replace(/[^a-z0-9]/gi, "").toUpperCase();
+}
 
-  const contextualMatch = normalized.match(OTP_CONTEXT_REGEX);
-  if (contextualMatch?.[1]) {
-    return contextualMatch[1].replace(/[^a-z0-9]/gi, "").toUpperCase();
+function isLikelyNonOtp(candidate: string) {
+  if (!candidate) {
+    return true;
   }
 
-  const numericMatches = normalized.match(OTP_DIGIT_REGEX);
-  if (!numericMatches || numericMatches.length === 0) {
-    return null;
+  if (/^(19|20)\d{2}$/.test(candidate)) {
+    return true;
   }
 
-  return numericMatches[0] ?? null;
+  if (/^\d{8}$/.test(candidate)) {
+    return true;
+  }
+
+  return false;
+}
+
+function scoreOtpCandidate(candidate: string, contextBoost: number) {
+  let score = contextBoost;
+
+  if (/^\d+$/.test(candidate)) {
+    score += 18;
+    if (candidate.length === 6) {
+      score += 12;
+    } else if (candidate.length === 4 || candidate.length === 5) {
+      score += 8;
+    } else if (candidate.length === 7 || candidate.length === 8) {
+      score += 6;
+    }
+  } else {
+    score += 10;
+    if (candidate.length >= 4 && candidate.length <= 8) {
+      score += 5;
+    }
+  }
+
+  if (isLikelyNonOtp(candidate)) {
+    score -= 40;
+  }
+
+  return score;
+}
+
+function collectOtpCandidates(source: string, contextBoost: number) {
+  const candidates: Array<{ code: string; score: number }> = [];
+  const normalized = normalizeText(source);
+
+  for (const match of normalized.matchAll(OTP_CONTEXT_REGEX)) {
+    const rawCandidate = typeof match[1] === "string" ? cleanOtpCandidate(match[1]) : "";
+    if (rawCandidate.length < 4 || rawCandidate.length > 10) {
+      continue;
+    }
+
+    candidates.push({
+      code: rawCandidate,
+      score: scoreOtpCandidate(rawCandidate, contextBoost + 40)
+    });
+  }
+
+  for (const match of normalized.matchAll(OTP_DIGIT_REGEX)) {
+    const rawCandidate = cleanOtpCandidate(match[0]);
+    candidates.push({
+      code: rawCandidate,
+      score: scoreOtpCandidate(rawCandidate, contextBoost)
+    });
+  }
+
+  for (const match of normalized.toUpperCase().matchAll(OTP_ALNUM_REGEX)) {
+    const rawCandidate = cleanOtpCandidate(match[0]);
+    if (/^\d+$/.test(rawCandidate)) {
+      continue;
+    }
+
+    candidates.push({
+      code: rawCandidate,
+      score: scoreOtpCandidate(rawCandidate, contextBoost - 4)
+    });
+  }
+
+  return candidates;
+}
+
+function extractOtpCode(input: { subject?: string; snippet?: string; body?: string }) {
+  const candidates = [
+    ...collectOtpCandidates(input.subject ?? "", 30),
+    ...collectOtpCandidates(input.snippet ?? "", 18),
+    ...collectOtpCandidates(input.body ?? "", 12)
+  ]
+    .filter((candidate) => candidate.code.length >= 4 && candidate.code.length <= 10)
+    .sort((left, right) => right.score - left.score);
+
+  return candidates[0]?.code ?? null;
 }
 
 function getOverlapStart(lastCheckedAt: string | null) {
@@ -292,8 +375,11 @@ async function fetchGoogleOtpMessages(
         const recipient = normalizeText(headerMap.get("to")) || account.emailAddress;
         const bodyText = normalizeText(flattenGooglePayloadBody(detailPayload?.payload));
         const snippet = normalizeText(detailPayload?.snippet);
-        const contentForOtp = [subject, snippet, bodyText].filter(Boolean).join(" ");
-        const otpCode = extractOtpCode(contentForOtp);
+        const otpCode = extractOtpCode({
+          subject,
+          snippet,
+          body: bodyText
+        });
 
         if (!otpCode) {
           return null;
@@ -364,8 +450,11 @@ async function fetchMicrosoftOtpMessages(
       const bodyPreview = normalizeText(message?.bodyPreview);
       const bodyContent =
         typeof message?.body?.content === "string" ? stripHtml(message.body.content) : "";
-      const contentForOtp = [subject, bodyPreview, bodyContent].filter(Boolean).join(" ");
-      const otpCode = extractOtpCode(contentForOtp);
+      const otpCode = extractOtpCode({
+        subject,
+        snippet: bodyPreview,
+        body: bodyContent
+      });
 
       if (!otpCode || typeof message?.id !== "string" || typeof message?.receivedDateTime !== "string") {
         return null;

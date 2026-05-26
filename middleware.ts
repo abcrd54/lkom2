@@ -7,9 +7,11 @@ const ADMIN_PROTECTED_PREFIXES = [
   "/mail-accounts",
   "/users",
   "/otp-inbox",
+  "/whatsapp",
   "/api/admin",
   "/api/users",
-  "/api/providers"
+  "/api/providers",
+  "/api/whatsapp"
 ];
 const ADMIN_PUBLIC_PATHS = ["/login", "/u"];
 

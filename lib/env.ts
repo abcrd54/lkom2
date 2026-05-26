@@ -10,6 +10,7 @@ const envSchema = z.object({
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_REDIRECT_URI: z.string().optional(),
+  FONNTE_TOKEN: z.string().optional(),
   TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
   CRON_SECRET: z.string().min(16).optional(),
   NEXT_PUBLIC_SITE_URL: z.string().url().optional()
@@ -25,6 +26,7 @@ export const env = envSchema.parse({
   MICROSOFT_CLIENT_ID: process.env.MICROSOFT_CLIENT_ID,
   MICROSOFT_CLIENT_SECRET: process.env.MICROSOFT_CLIENT_SECRET,
   MICROSOFT_REDIRECT_URI: process.env.MICROSOFT_REDIRECT_URI,
+  FONNTE_TOKEN: process.env.FONNTE_TOKEN,
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   CRON_SECRET: process.env.CRON_SECRET,
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL

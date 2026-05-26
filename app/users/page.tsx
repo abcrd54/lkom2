@@ -13,6 +13,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const user = await getAdminSessionUser();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const page = parsePositiveInt(getSingleSearchParam(resolvedSearchParams?.userPage), 1);
+  const userSearch = getSingleSearchParam(resolvedSearchParams?.search, "") ?? "";
   const [stats, mailAccounts, users] = await Promise.all([
     getMailAccountSummary(),
     listMailAccounts(),
@@ -26,7 +27,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         activeTab="manage-user"
         stats={stats}
         mailAccounts={mailAccounts}
-        users={users}
+        users={{ ...users, searchQuery: userSearch }}
         oauthFeedback={readOauthFeedback(resolvedSearchParams)}
       />
     </PageShell>
