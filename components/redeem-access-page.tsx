@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  activationLabel,
   asProviderPayload,
-  formatRedeemDateTime,
   translateChineseText,
   type RedeemLookupResult
 } from "@/lib/redeem-access-shared";
@@ -45,6 +43,18 @@ export function RedeemAccessPage({
     }
   }
 
+  useEffect(() => {
+    if (!result.ok || !providerPayload?.accountEmail) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void handleRefreshOtp();
+    }, 10_000);
+
+    return () => window.clearInterval(interval);
+  }, [accessToken, result.ok, providerPayload?.accountEmail]);
+
   return (
     <section className="redeem-access-shell">
       <div className="redeem-access-card">
@@ -70,6 +80,7 @@ export function RedeemAccessPage({
             <button className="button" disabled={isRefreshing} onClick={handleRefreshOtp} type="button">
               {isRefreshing ? "Memperbarui OTP..." : "Refresh OTP"}
             </button>
+            <p className="micro">Auto refresh tiap 10 detik.</p>
             {refreshMessage ? <p className="micro">{refreshMessage}</p> : null}
           </div>
         ) : refreshMessage ? (
@@ -94,20 +105,12 @@ export function RedeemAccessPage({
             {providerPayload ? (
               <div className="redeem-result-grid">
                 <div className="user-summary-card">
-                  <span className="user-summary-label">Aktivasi</span>
-                  <strong>{activationLabel(providerPayload.activationStatus)}</strong>
-                </div>
-                <div className="user-summary-card">
                   <span className="user-summary-label">Email Akun</span>
                   <strong>{providerPayload.accountEmail ?? "-"}</strong>
                 </div>
                 <div className="user-summary-card">
                   <span className="user-summary-label">Kode OTP Email</span>
                   <strong>{providerPayload.emailCode ?? "-"}</strong>
-                </div>
-                <div className="user-summary-card">
-                  <span className="user-summary-label">Dipakai Pada</span>
-                  <strong>{formatRedeemDateTime(providerPayload.usedAt)}</strong>
                 </div>
               </div>
             ) : null}
@@ -117,43 +120,6 @@ export function RedeemAccessPage({
                 <strong>{translateChineseText(providerPayload?.message) || "Hasil Redeem"}</strong>
                 <span className="micro">{result.queryUrl}</span>
               </div>
-
-              {providerPayload ? (
-                <div className="redeem-detail-list">
-                  <div className="redeem-detail-row">
-                    <span>Status Key</span>
-                    <strong>{translateChineseText(providerPayload.keyStatus) || "-"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Tipe Key</span>
-                    <strong>{translateChineseText(providerPayload.keyType) || "-"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Nomor Tugas</span>
-                    <strong>{providerPayload.taskNo ?? "-"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Kedaluwarsa</span>
-                    <strong>{formatRedeemDateTime(providerPayload.expiresAt)}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>File Produk</span>
-                    <strong>{providerPayload.hasProductFiles ? "Ada" : "Tidak ada"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Butuh Token</span>
-                    <strong>{providerPayload.requiresToken ? "Ya" : "Tidak"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Perlu Tracking</span>
-                    <strong>{providerPayload.shouldTrack ? "Ya" : "Tidak"}</strong>
-                  </div>
-                  <div className="redeem-detail-row">
-                    <span>Kode Provider</span>
-                    <strong>{providerPayload.keyCode ?? result.code}</strong>
-                  </div>
-                </div>
-              ) : null}
 
               <details className="redeem-raw-json">
                 <summary>Lihat JSON mentah</summary>
