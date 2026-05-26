@@ -57,6 +57,19 @@ const OTP_CONTEXT_REGEX =
   /(?:otp|one[\s-]?time password|verification code|verification|verify|security code|passcode|pin|kode verifikasi|kode otp|kode|code)[^a-z0-9]{0,24}([a-z0-9][a-z0-9\s-]{3,11})/gi;
 const OTP_DIGIT_REGEX = /\b\d{4,8}\b/g;
 const OTP_ALNUM_REGEX = /\b[A-Z0-9]{4,10}\b/g;
+const OTP_STOPWORDS = new Set([
+  "ENTER",
+  "LOGIN",
+  "LOGON",
+  "CONTINUE",
+  "VERIFY",
+  "VERIFICATION",
+  "CODE",
+  "PASSCODE",
+  "PASSWORD",
+  "TEMPORARY",
+  "CHATGPT"
+]);
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -87,6 +100,14 @@ function cleanOtpCandidate(value: string) {
 
 function isLikelyNonOtp(candidate: string) {
   if (!candidate) {
+    return true;
+  }
+
+  if (OTP_STOPWORDS.has(candidate)) {
+    return true;
+  }
+
+  if (/^[A-Z]+$/.test(candidate)) {
     return true;
   }
 
@@ -137,6 +158,10 @@ function collectOtpCandidates(source: string, contextBoost: number) {
       continue;
     }
 
+    if (isLikelyNonOtp(rawCandidate)) {
+      continue;
+    }
+
     candidates.push({
       code: rawCandidate,
       score: scoreOtpCandidate(rawCandidate, contextBoost + 40)
@@ -154,6 +179,10 @@ function collectOtpCandidates(source: string, contextBoost: number) {
   for (const match of normalized.toUpperCase().matchAll(OTP_ALNUM_REGEX)) {
     const rawCandidate = cleanOtpCandidate(match[0]);
     if (/^\d+$/.test(rawCandidate)) {
+      continue;
+    }
+
+    if (isLikelyNonOtp(rawCandidate) || !/\d/.test(rawCandidate)) {
       continue;
     }
 
