@@ -105,6 +105,20 @@ function mapUserRow(row: UserRow): UserView {
   };
 }
 
+function normalizePhoneNumber(phoneNumber: string) {
+  const digitsOnly = phoneNumber.replace(/\D/g, "");
+
+  if (digitsOnly.startsWith("0")) {
+    return `62${digitsOnly.slice(1)}`;
+  }
+
+  if (digitsOnly.startsWith("62")) {
+    return digitsOnly;
+  }
+
+  return digitsOnly;
+}
+
 async function assertAssignableMailAccount(mailAccountId: string) {
   const account = await getMailAccountById(mailAccountId);
 
@@ -162,6 +176,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
 
 export async function createUser(input: z.infer<typeof createUserSchema>) {
   await assertAssignableMailAccount(input.mailAccountId);
+  const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
 
   const supabase = createSupabaseAdminClient();
   const accessToken = generateAccessToken();
@@ -172,7 +187,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
     .from("users")
     .insert({
       name: input.name,
-      phone_number: input.phoneNumber,
+      phone_number: normalizedPhoneNumber,
       mail_account_id: input.mailAccountId,
       access_token_encrypted: accessTokenEncrypted,
       access_token_hash: accessTokenHash,
@@ -193,6 +208,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
 
 export async function updateUser(input: z.infer<typeof updateUserSchema>) {
   await assertAssignableMailAccount(input.mailAccountId);
+  const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
 
   const supabase = createSupabaseAdminClient();
   const payload: {
@@ -203,7 +219,7 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
     link_disabled_at?: string | null;
   } = {
     name: input.name,
-    phone_number: input.phoneNumber,
+    phone_number: normalizedPhoneNumber,
     mail_account_id: input.mailAccountId
   };
 

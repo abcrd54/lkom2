@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useEffect, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ConnectProviderButton } from "@/components/connect-provider-buttons";
 import { LogoutButton } from "@/components/logout-button";
 import { getDashboardPath, type DashboardTab } from "@/lib/admin-dashboard";
@@ -426,6 +426,65 @@ function ManageUserSection({
   compact?: boolean;
   fullWidth?: boolean;
 }) {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [mailAccountId, setMailAccountId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [createdAccessLink, setCreatedAccessLink] = useState<string | null>(null);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setCreatedAccessLink(null);
+
+    try {
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name,
+          phoneNumber,
+          mailAccountId
+        })
+      });
+
+      const payload = (await response.json()) as
+        | {
+            ok: true;
+            data: {
+              user: UserView;
+              accessLink: string;
+            };
+          }
+        | {
+            ok: false;
+            error?: string;
+          };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? "Failed to create user." : payload.error ?? "Failed to create user.");
+      }
+
+      setSuccessMessage(`User created: ${payload.data.user.name}`);
+      setCreatedAccessLink(payload.data.accessLink);
+      setName("");
+      setPhoneNumber("");
+      setMailAccountId("");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to create user.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <section className={cn("card", compact && "overview-card", fullWidth && "card-span-full")}>
       <div className="card-header">
@@ -435,18 +494,38 @@ function ManageUserSection({
         </div>
       </div>
 
-      <form className="form-grid admin-form">
+      <form className="form-grid admin-form" onSubmit={handleSubmit}>
         <div className="field">
           <label htmlFor="name">Nama</label>
-          <input id="name" name="name" placeholder="Andi Saputra" />
+          <input
+            id="name"
+            name="name"
+            placeholder="Andi Saputra"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
         </div>
         <div className="field">
           <label htmlFor="phone">Phone</label>
-          <input id="phone" name="phone" placeholder="081234567890" />
+          <input
+            id="phone"
+            name="phone"
+            placeholder="081234567890"
+            value={phoneNumber}
+            onChange={(event) => setPhoneNumber(event.target.value)}
+            required
+          />
         </div>
         <div className="field">
           <label htmlFor="inbox">Inbox</label>
-          <select id="inbox" name="inbox" defaultValue="">
+          <select
+            id="inbox"
+            name="inbox"
+            value={mailAccountId}
+            onChange={(event) => setMailAccountId(event.target.value)}
+            required
+          >
             <option value="" disabled>
               Select active inbox
             </option>
@@ -460,13 +539,19 @@ function ManageUserSection({
               ))}
           </select>
         </div>
+        {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
+        {successMessage ? (
+          <div className="form-feedback success-block">
+            <p className="success-title">{successMessage}</p>
+            {createdAccessLink ? <p className="micro">{createdAccessLink}</p> : null}
+          </div>
+        ) : null}
+        <div className="button-row toolbar-row">
+          <button className="button" disabled={isSubmitting} type="submit">
+            {isSubmitting ? "Adding..." : "Add User"}
+          </button>
+        </div>
       </form>
-
-      <div className="button-row toolbar-row">
-        <button className="button" type="button">
-          Add User
-        </button>
-      </div>
 
       <div className="table-wrap">
         <table className="data-table adminlte-table">
