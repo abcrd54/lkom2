@@ -2,6 +2,37 @@ import { NextResponse } from "next/server";
 import { exchangeAuthorizationCode, fetchProviderEmail, verifyOAuthState } from "@/lib/oauth";
 import { upsertConnectedMailAccount } from "@/lib/mail-account-connections";
 
+function renderPopupClosePage(redirectUrl: URL) {
+  const targetUrl = JSON.stringify(redirectUrl.toString());
+
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Microsoft OAuth</title>
+  </head>
+  <body>
+    <script>
+      const targetUrl = ${targetUrl};
+      if (window.opener && !window.opener.closed) {
+        window.opener.location.href = targetUrl;
+        window.close();
+      } else {
+        window.location.href = targetUrl;
+      }
+    </script>
+  </body>
+</html>`,
+    {
+      headers: {
+        "content-type": "text/html; charset=utf-8"
+      }
+    }
+  );
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const redirectUrl = new URL("/mail-accounts", request.url);
@@ -43,5 +74,5 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.redirect(redirectUrl);
+  return renderPopupClosePage(redirectUrl);
 }
