@@ -1470,6 +1470,14 @@ function WhatsappSection({
     });
   }
 
+  function selectFirstTenRecipients() {
+    setSelectedRecipientIds(filteredRecipients.slice(0, 10).map((recipient) => recipient.id));
+  }
+
+  function clearSelectedRecipients() {
+    setSelectedRecipientIds([]);
+  }
+
   function handleEditTemplate(template: {
     id: string;
     name: string;
@@ -1753,6 +1761,24 @@ function WhatsappSection({
           </div>
           <div className="recipient-meta">
             Selected {selectedRecipientIds.length}/10 recipient(s)
+          </div>
+          <div className="button-row">
+            <button
+              className="button secondary"
+              disabled={filteredRecipients.length === 0}
+              onClick={selectFirstTenRecipients}
+              type="button"
+            >
+              Select 10
+            </button>
+            <button
+              className="button secondary"
+              disabled={selectedRecipientIds.length === 0}
+              onClick={clearSelectedRecipients}
+              type="button"
+            >
+              Clear
+            </button>
           </div>
           <div className="recipient-list">
             {filteredRecipients.map((recipient) => (
