@@ -239,7 +239,13 @@ async function fetchGoogleOtpMessages(
   const listPayload = await listResponse.json();
 
   if (!listResponse.ok) {
-    throw new Error("Failed to fetch Gmail message list.");
+    const providerMessage =
+      typeof listPayload?.error?.message === "string"
+        ? listPayload.error.message
+        : typeof listPayload?.error_description === "string"
+          ? listPayload.error_description
+          : "Failed to fetch Gmail message list.";
+    throw new Error(`Gmail list failed (${listResponse.status}): ${providerMessage}`);
   }
 
   const messages = Array.isArray(listPayload?.messages)
@@ -265,7 +271,11 @@ async function fetchGoogleOtpMessages(
         const detailPayload = await detailResponse.json();
 
         if (!detailResponse.ok) {
-          return null;
+          const providerMessage =
+            typeof detailPayload?.error?.message === "string"
+              ? detailPayload.error.message
+              : "Failed to fetch Gmail message detail.";
+          throw new Error(`Gmail detail failed (${detailResponse.status}): ${providerMessage}`);
         }
 
         const headers = Array.isArray(detailPayload?.payload?.headers)
@@ -334,7 +344,13 @@ async function fetchMicrosoftOtpMessages(
   const payload = await response.json();
 
   if (!response.ok) {
-    throw new Error("Failed to fetch Microsoft message list.");
+    const providerMessage =
+      typeof payload?.error?.message === "string"
+        ? payload.error.message
+        : typeof payload?.error_description === "string"
+          ? payload.error_description
+          : "Failed to fetch Microsoft message list.";
+    throw new Error(`Microsoft list failed (${response.status}): ${providerMessage}`);
   }
 
   const messages = (Array.isArray(payload?.value) ? payload.value : []) as MicrosoftMessage[];
