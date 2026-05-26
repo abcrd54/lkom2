@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import {
   asProviderPayload,
-  translateChineseText,
   type RedeemLookupResult
 } from "@/lib/redeem-access-shared";
 
@@ -117,7 +116,6 @@ export function RedeemAccessPage({
 
             <div className="redeem-provider-panel">
               <div className="redeem-provider-head">
-                <strong>{translateChineseText(providerPayload?.message) || "Hasil Redeem"}</strong>
                 <span className="micro">{result.queryUrl}</span>
               </div>
 
