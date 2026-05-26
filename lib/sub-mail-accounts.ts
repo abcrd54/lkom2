@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getMailAccountById } from "@/lib/mail-accounts";
+import type { MailProvider } from "@/lib/types";
 
 export const createSubMailAccountSchema = z.object({
   mailAccountId: z.string().uuid(),
@@ -30,6 +31,13 @@ type SubMailAccountLookupRow = SubMailAccountRow & {
         status: string;
       }>
     | null;
+};
+
+type MailAccountLookupRow = {
+  id: string;
+  provider: MailProvider;
+  email_address: string;
+  status: string;
 };
 
 export type SubMailAccountView = {
@@ -143,6 +151,65 @@ export async function getActiveSubMailAccountByDisplayEmail(displayEmail: string
   if (!mailAccount || mailAccount.status === "disabled") {
     return null;
   }
+
+  return {
+    id: row.id,
+    mailAccountId: row.mail_account_id,
+    label: row.label,
+    displayEmail: row.display_email,
+    maxUsers: row.max_users,
+    connectedUsers: 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  } satisfies SubMailAccountView;
+}
+
+export async function resolveActiveInboxSlotByEmail(displayEmail: string) {
+  const normalizedDisplayEmail = displayEmail.trim().toLowerCase();
+  const existingSubMailAccount = await getActiveSubMailAccountByDisplayEmail(normalizedDisplayEmail);
+
+  if (existingSubMailAccount) {
+    return existingSubMailAccount;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("mail_accounts")
+    .select("id, provider, email_address, status")
+    .eq("email_address", normalizedDisplayEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const mailAccount = data as MailAccountLookupRow | null;
+
+  if (!mailAccount || mailAccount.status === "disabled") {
+    return null;
+  }
+
+  const { data: primarySubAccount, error: primarySubAccountError } = await supabase
+    .from("sub_mail_accounts")
+    .upsert(
+      {
+        mail_account_id: mailAccount.id,
+        label: "Primary",
+        display_email: normalizedDisplayEmail,
+        max_users: 3
+      },
+      {
+        onConflict: "mail_account_id,display_email"
+      }
+    )
+    .select("id, mail_account_id, label, display_email, max_users, created_at, updated_at")
+    .single();
+
+  if (primarySubAccountError) {
+    throw primarySubAccountError;
+  }
+
+  const row = primarySubAccount as SubMailAccountRow;
 
   return {
     id: row.id,

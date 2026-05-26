@@ -5,8 +5,8 @@ import {
   getRedeemCodeByCode,
   normalizeImportedRedeemCode
 } from "@/lib/redeem-codes";
-import { getActiveSubMailAccountByDisplayEmail } from "@/lib/sub-mail-accounts";
-import { createUser, deleteUser } from "@/lib/users";
+import { resolveActiveInboxSlotByEmail } from "@/lib/sub-mail-accounts";
+import { createUser, deleteUser, normalizeUserPhoneNumber } from "@/lib/users";
 import { z } from "zod";
 
 const bulkImportRowSchema = z.object({
@@ -29,6 +29,61 @@ type ImportFailure = {
   reason: string;
 };
 
+type ImportReasonSummary = {
+  reason: string;
+  count: number;
+};
+
+function hasScientificNotation(value: string) {
+  return /^\d+(\.\d+)?e[+-]?\d+$/i.test(value.trim());
+}
+
+function formatImportFailureReason(
+  error: unknown,
+  context: Pick<ImportFailure, "emailConnect" | "codeRedeem">
+) {
+  const message = getErrorMessage(error);
+
+  if (message.startsWith("Inbox slot not found or disabled:")) {
+    return `Inbox "${context.emailConnect}" was not found or is disabled.`;
+  }
+
+  const subAccountLimitMatch = message.match(/sub mail account already has maximum (\d+) active users/i);
+  if (subAccountLimitMatch) {
+    return `Inbox "${context.emailConnect}" is full (${subAccountLimitMatch[1]} active users max).`;
+  }
+
+  if (message.startsWith("Phone number is already used by ")) {
+    return message;
+  }
+
+  if (message.startsWith("Redeem code not found:")) {
+    return `Redeem code "${context.codeRedeem}" was not found.`;
+  }
+
+  if (/redeem code already has maximum 3 users/i.test(message)) {
+    return `Redeem code "${context.codeRedeem}" is full (3 users max).`;
+  }
+
+  if (/user already has a redeem code/i.test(message)) {
+    return "This user already has a redeem code assigned.";
+  }
+
+  return message;
+}
+
+function buildReasonSummary(items: ImportFailure[]) {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason));
+}
+
 export async function POST(request: Request) {
   try {
     await requireAdminSession();
@@ -36,13 +91,44 @@ export async function POST(request: Request) {
     const failed: ImportFailure[] = [];
     const partial: ImportFailure[] = [];
     let successCount = 0;
-    const subAccountCache = new Map<string, Awaited<ReturnType<typeof getActiveSubMailAccountByDisplayEmail>>>();
+    const subAccountCache = new Map<string, Awaited<ReturnType<typeof resolveActiveInboxSlotByEmail>>>();
     const redeemCodeCache = new Map<string, Awaited<ReturnType<typeof getRedeemCodeByCode>>>();
+    const firstRowByPhone = new Map<string, number>();
 
     for (const [index, row] of payload.rows.entries()) {
       const rowNumber = index + 2;
       const emailConnect = row.emailConnect.trim().toLowerCase();
       const codeRedeem = normalizeImportedRedeemCode(row.codeRedeem);
+      const rawPhoneNumber = row.phoneNumber.trim();
+      const normalizedPhoneNumber = normalizeUserPhoneNumber(row.phoneNumber);
+
+      if (hasScientificNotation(rawPhoneNumber)) {
+        failed.push({
+          row: rowNumber,
+          name: row.name,
+          phoneNumber: row.phoneNumber,
+          emailConnect,
+          codeRedeem,
+          reason:
+            "Phone number is stored in scientific notation. Re-export the file with the phoneNumber column formatted as Text."
+        });
+        continue;
+      }
+
+      const firstSeenRow = firstRowByPhone.get(normalizedPhoneNumber);
+      if (firstSeenRow) {
+        failed.push({
+          row: rowNumber,
+          name: row.name,
+          phoneNumber: row.phoneNumber,
+          emailConnect,
+          codeRedeem,
+          reason: `Phone number is duplicated in this import file (first used on row ${firstSeenRow}).`
+        });
+        continue;
+      }
+
+      firstRowByPhone.set(normalizedPhoneNumber, rowNumber);
 
       if (!emailConnect && !codeRedeem) {
         failed.push({
@@ -64,12 +150,12 @@ export async function POST(request: Request) {
           let subMailAccount = subAccountCache.get(emailConnect);
 
           if (subMailAccount === undefined) {
-            subMailAccount = await getActiveSubMailAccountByDisplayEmail(emailConnect);
+            subMailAccount = await resolveActiveInboxSlotByEmail(emailConnect);
             subAccountCache.set(emailConnect, subMailAccount);
           }
 
           if (!subMailAccount) {
-            throw new Error(`Sub account not found or disabled: ${emailConnect}`);
+            throw new Error(`Inbox slot not found or disabled: ${emailConnect}`);
           }
 
           const user = await createUser({
@@ -117,7 +203,7 @@ export async function POST(request: Request) {
                 phoneNumber: row.phoneNumber,
                 emailConnect,
                 codeRedeem,
-                reason: getErrorMessage(error)
+                reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
               });
               continue;
             }
@@ -129,7 +215,7 @@ export async function POST(request: Request) {
               phoneNumber: row.phoneNumber,
               emailConnect,
               codeRedeem,
-              reason: getErrorMessage(error)
+              reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
             });
             continue;
           }
@@ -143,7 +229,7 @@ export async function POST(request: Request) {
           phoneNumber: row.phoneNumber,
           emailConnect,
           codeRedeem,
-          reason: getErrorMessage(error)
+          reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
         });
       }
     }
@@ -153,7 +239,9 @@ export async function POST(request: Request) {
       partialCount: partial.length,
       failedCount: failed.length,
       partial,
-      failed
+      failed,
+      partialSummary: buildReasonSummary(partial),
+      failedSummary: buildReasonSummary(failed)
     });
   } catch (error) {
     return jsonError(getErrorMessage(error), 400);

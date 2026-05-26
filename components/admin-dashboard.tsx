@@ -716,6 +716,14 @@ function ManageUserSection({
     successCount: number;
     partialCount: number;
     failedCount: number;
+    partialSummary: Array<{
+      reason: string;
+      count: number;
+    }>;
+    failedSummary: Array<{
+      reason: string;
+      count: number;
+    }>;
     partial: Array<{
       row: number;
       name: string;
@@ -811,18 +819,43 @@ function ManageUserSection({
   }
 
   function downloadTemplate() {
-    const csv = "name,phoneNumber,email_connect,code_redeem\n";
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "user-import-template.csv";
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ["name", "phoneNumber", "email_connect", "code_redeem"],
+      ["", "", "", ""]
+    ]);
+
+    worksheet["B2"] = {
+      t: "s",
+      v: "628123456789"
+    };
+    worksheet["!cols"] = [
+      { wch: 28 },
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 24 }
+    ];
+
+    const noteSheet = XLSX.utils.aoa_to_sheet([
+      ["Notes"],
+      ["Format phoneNumber as plain text and use the 628xxxx format."],
+      ["Example: 628123456789"],
+      ["email_connect can be a parent Gmail, Sub-Gmail, or Microsoft inbox."],
+      ["Leave code_redeem empty unless the row should use a redeem code."]
+    ]);
+    noteSheet["!cols"] = [{ wch: 72 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "users");
+    XLSX.utils.book_append_sheet(workbook, noteSheet, "notes");
+    XLSX.writeFile(workbook, "user-import-template.xlsx");
   }
 
   function normalizeHeaderKey(value: string) {
     return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  }
+
+  function hasScientificNotation(value: string) {
+    return /^\d+(\.\d+)?e[+-]?\d+$/i.test(value.trim());
   }
 
   async function parseBulkFile(file: File) {
@@ -836,7 +869,8 @@ function ManageUserSection({
 
     const worksheet = workbook.Sheets[sheetName];
     const rawRows = XLSX.utils.sheet_to_json<Record<string, string | number | null>>(worksheet, {
-      defval: ""
+      defval: "",
+      raw: false
     });
 
     const parsedRows = rawRows
@@ -869,6 +903,23 @@ function ManageUserSection({
 
     if (parsedRows.length === 0) {
       throw new Error("Import file is empty or template headers are invalid.");
+    }
+
+    const scientificPhoneRows = parsedRows
+      .map((row, index) => ({ rowNumber: index + 2, phoneNumber: row.phoneNumber }))
+      .filter((row) => hasScientificNotation(row.phoneNumber));
+
+    if (scientificPhoneRows.length > 0) {
+      const previewRows = scientificPhoneRows
+        .slice(0, 5)
+        .map((row) => row.rowNumber)
+        .join(", ");
+      const extraCount = scientificPhoneRows.length - Math.min(scientificPhoneRows.length, 5);
+      const extraLabel = extraCount > 0 ? ` and ${extraCount} more` : "";
+
+      throw new Error(
+        `Phone numbers use scientific notation on row ${previewRows}${extraLabel}. Format the phoneNumber column as Text before exporting CSV/XLSX.`
+      );
     }
 
     const invalidRow = parsedRows.find(
@@ -983,6 +1034,14 @@ function ManageUserSection({
               successCount: number;
               partialCount: number;
               failedCount: number;
+              partialSummary: Array<{
+                reason: string;
+                count: number;
+              }>;
+              failedSummary: Array<{
+                reason: string;
+                count: number;
+              }>;
               partial: Array<{
                 row: number;
                 name: string;
@@ -1140,7 +1199,7 @@ function ManageUserSection({
                 <p>
                   {modalMode === "single"
                     ? "Create one inbox user or one standalone redeem-only user."
-                    : "Upload CSV, XLS, or XLSX using the import template headers."}
+                    : "Upload XLSX, XLS, or CSV using the import template headers."}
                 </p>
               </div>
               <button className="modal-close" onClick={closeModal} type="button">
@@ -1166,7 +1225,7 @@ function ManageUserSection({
                   <input
                     id="modal-phone"
                     name="phone"
-                    placeholder="081234567890"
+                    placeholder="628123456789"
                     value={phoneNumber}
                     onChange={(event) => setPhoneNumber(event.target.value)}
                     required
@@ -1242,10 +1301,11 @@ function ManageUserSection({
                   <code>name,phoneNumber,email_connect,code_redeem</code>
                 </div>
                 <p className="micro">
-                  Use `email_connect` from the Sub-Gmail display email list. Leave it empty only
-                  when `code_redeem` should be assigned to an existing user matched by phone
-                  number.
+                  Use `email_connect` from any connected inbox address: parent Gmail, Sub-Gmail,
+                  or Microsoft inbox. Leave it empty only when `code_redeem` should be assigned to
+                  an existing user matched by phone number.
                 </p>
+                <p className="micro">Use `phoneNumber` in `628xxxx` format and prefer the XLSX template.</p>
                 {bulkFileName ? (
                   <p className="micro">
                     {bulkFileName} | {bulkRows.length} row(s) ready
@@ -1259,6 +1319,24 @@ function ManageUserSection({
                       {bulkResult.successCount} success | {bulkResult.partialCount} partial |{" "}
                       {bulkResult.failedCount} failed
                     </p>
+                    {bulkResult.partialSummary.length > 0 ? (
+                      <div className="bulk-failed-list">
+                        {bulkResult.partialSummary.map((item) => (
+                          <p className="micro" key={`partial-summary-${item.reason}`}>
+                            Partial summary | {item.count} row(s): {item.reason}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                    {bulkResult.failedSummary.length > 0 ? (
+                      <div className="bulk-failed-list">
+                        {bulkResult.failedSummary.map((item) => (
+                          <p className="micro" key={`failed-summary-${item.reason}`}>
+                            Failed summary | {item.count} row(s): {item.reason}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                     {bulkResult.partial.length > 0 ? (
                       <div className="bulk-failed-list">
                         {bulkResult.partial.map((partialRow) => (

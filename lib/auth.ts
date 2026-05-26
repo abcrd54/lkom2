@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient, hasSupabaseServerConfig } from "@/lib/supabase/server";
 import { jsonError } from "@/lib/http";
 
 export async function requireAdminSession() {
@@ -17,6 +17,10 @@ export async function requireAdminSession() {
 }
 
 export async function getAdminSessionUser() {
+  if (!hasSupabaseServerConfig()) {
+    return null;
+  }
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user }
