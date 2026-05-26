@@ -6,7 +6,7 @@ import {
   asProviderPayload,
   formatRedeemDateTime,
   type RedeemLookupResult
-} from "@/lib/redeem-access";
+} from "@/lib/redeem-access-shared";
 
 export function RedeemAccessPage({
   accessToken,
