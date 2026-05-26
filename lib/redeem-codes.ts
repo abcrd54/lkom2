@@ -231,3 +231,28 @@ export async function unassignUserFromRedeemCode(
     deleted: true
   };
 }
+
+export async function getRedeemCodeForUser(userId: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("redeem_code_users")
+    .select("assigned_at, redeem_codes(code)")
+    .eq("user_id", userId)
+    .order("assigned_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const relation = Array.isArray(data.redeem_codes)
+    ? (data.redeem_codes[0] ?? null)
+    : data.redeem_codes ?? null;
+
+  return relation?.code ?? null;
+}

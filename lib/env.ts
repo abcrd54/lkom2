@@ -13,7 +13,8 @@ const envSchema = z.object({
   FONNTE_TOKEN: z.string().optional(),
   TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
   CRON_SECRET: z.string().min(16).optional(),
-  NEXT_PUBLIC_SITE_URL: z.string().url().optional()
+  NEXT_PUBLIC_SITE_URL: z.string().url().optional(),
+  REDEEM_QUERY_URL_TEMPLATE: z.string().optional()
 });
 
 export const env = envSchema.parse({
@@ -29,5 +30,6 @@ export const env = envSchema.parse({
   FONNTE_TOKEN: process.env.FONNTE_TOKEN,
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   CRON_SECRET: process.env.CRON_SECRET,
-  NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL
+  NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+  REDEEM_QUERY_URL_TEMPLATE: process.env.REDEEM_QUERY_URL_TEMPLATE
 });

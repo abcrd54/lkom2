@@ -15,7 +15,7 @@ const ADMIN_PROTECTED_PREFIXES = [
   "/api/providers",
   "/api/whatsapp"
 ];
-const ADMIN_PUBLIC_PATHS = ["/login", "/u"];
+const ADMIN_PUBLIC_PATHS = ["/login", "/u", "/r"];
 
 function isAdminProtectedPath(pathname: string) {
   if (ADMIN_PUBLIC_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { encryptSecret, decryptSecret } from "@/lib/secrets";
 
 const ACCESS_ROUTE_PREFIX = "/u/";
+const REDEEM_ROUTE_PREFIX = "/r/";
 
 export function generateAccessToken() {
   return randomBytes(24).toString("base64url");
@@ -25,4 +26,12 @@ export function buildAccessPath(token: string) {
 
 export function buildAbsoluteAccessLink(origin: string, token: string) {
   return new URL(buildAccessPath(token), origin).toString();
+}
+
+export function buildRedeemPath(token: string) {
+  return `${REDEEM_ROUTE_PREFIX}${token}`;
+}
+
+export function buildAbsoluteRedeemLink(origin: string, token: string) {
+  return new URL(buildRedeemPath(token), origin).toString();
 }

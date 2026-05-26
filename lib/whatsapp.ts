@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { buildAbsoluteAccessLink, decryptAccessToken } from "@/lib/access-links";
+import {
+  buildAbsoluteAccessLink,
+  buildAbsoluteRedeemLink,
+  decryptAccessToken
+} from "@/lib/access-links";
 import { env } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -30,7 +34,9 @@ type WhatsappLogRow = {
     userId: string;
     name: string;
     phoneNumber: string;
+    email?: string;
     redeemCode?: string | null;
+    redeemLink?: string;
   }>;
   recipient_count: number;
   status: "queued" | "sent" | "failed" | "partial";
@@ -45,6 +51,14 @@ type RecipientRow = {
   phone_number: string;
   status: "active" | "disabled";
   access_token_encrypted: string;
+  mail_accounts?:
+    | {
+        email_address: string;
+      }
+    | Array<{
+        email_address: string;
+      }>
+    | null;
   redeem_code_users?:
     | Array<{
         assigned_at: string;
@@ -59,6 +73,11 @@ type RecipientRow = {
       }>
     | null;
 };
+
+function getInboxEmail(relation: RecipientRow["mail_accounts"]): string {
+  const mailAccount = Array.isArray(relation) ? (relation[0] ?? null) : relation ?? null;
+  return mailAccount?.email_address ?? "";
+}
 
 function getLatestRedeemCode(
   assignments: RecipientRow["redeem_code_users"]
@@ -155,7 +174,7 @@ export async function listWhatsappRecipients() {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, status, access_token_encrypted, redeem_code_users(assigned_at, redeem_codes(code))"
+      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), redeem_code_users(assigned_at, redeem_codes(code))"
     )
     .eq("status", "active")
     .order("created_at", { ascending: false })
@@ -172,8 +191,10 @@ export async function listWhatsappRecipients() {
     name: row.name,
     phoneNumber: row.phone_number,
     status: row.status,
+    email: getInboxEmail(row.mail_accounts),
     accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
-    redeemCode: getLatestRedeemCode(row.redeem_code_users)
+    redeemCode: getLatestRedeemCode(row.redeem_code_users),
+    redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
   }));
 }
 
@@ -197,7 +218,7 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, status, access_token_encrypted, redeem_code_users(assigned_at, redeem_codes(code))"
+      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), redeem_code_users(assigned_at, redeem_codes(code))"
     )
     .in("id", recipientUserIds)
     .eq("status", "active");
@@ -212,8 +233,10 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
     id: row.id,
     name: row.name,
     phoneNumber: row.phone_number,
+    email: getInboxEmail(row.mail_accounts),
     accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
-    redeemCode: getLatestRedeemCode(row.redeem_code_users)
+    redeemCode: getLatestRedeemCode(row.redeem_code_users),
+    redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
   }));
 }
 
@@ -236,7 +259,7 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
   const target = recipients
     .map(
       (recipient) =>
-        `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${recipient.accessLink}|${recipient.redeemCode ?? "-"}`
+        `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${recipient.accessLink}|${recipient.redeemCode ?? "-"}|${recipient.email || "-"}|${recipient.redeemLink}`
     )
     .join(",");
   const formData = new FormData();
@@ -247,6 +270,8 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
       .replaceAll("{phone}", "{var1}")
       .replaceAll("{link}", "{var2}")
       .replaceAll("{code}", "{var3}")
+      .replaceAll("{email}", "{var4}")
+      .replaceAll("{redeem_link}", "{var5}")
   );
   formData.set("countryCode", "0");
 

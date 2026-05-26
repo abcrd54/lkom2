@@ -136,9 +136,11 @@ type AdminDashboardProps = {
     id: string;
     name: string;
     phoneNumber: string;
+    email: string;
     status: "active" | "disabled";
     accessLink: string;
     redeemCode: string | null;
+    redeemLink: string;
   }>;
 };
 
@@ -1061,15 +1063,19 @@ function WhatsappSection({
     recipient: {
       name: string;
       phoneNumber: string;
+      email: string;
       accessLink: string;
       redeemCode: string | null;
+      redeemLink: string;
     }
   ) {
     return message
       .replaceAll("{name}", recipient.name)
       .replaceAll("{phone}", recipient.phoneNumber)
+      .replaceAll("{email}", recipient.email || "-")
       .replaceAll("{link}", recipient.accessLink)
-      .replaceAll("{code}", recipient.redeemCode ?? "-");
+      .replaceAll("{code}", recipient.redeemCode ?? "-")
+      .replaceAll("{redeem_link}", recipient.redeemLink);
   }
 
   function toggleRecipient(recipientId: string) {
@@ -1187,8 +1193,10 @@ function WhatsappSection({
             Available variables:
             <code>{`{name}`}</code>
             <code>{`{phone}`}</code>
+            <code>{`{email}`}</code>
             <code>{`{link}`}</code>
             <code>{`{code}`}</code>
+            <code>{`{redeem_link}`}</code>
           </div>
           <div className="button-row toolbar-row">
             <button className="button" disabled={isSavingTemplate} type="submit">

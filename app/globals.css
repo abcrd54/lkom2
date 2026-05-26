@@ -928,6 +928,68 @@ textarea {
   gap: 18px;
 }
 
+.redeem-access-shell {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+}
+
+.redeem-access-card {
+  display: grid;
+  gap: 18px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  padding: 24px;
+}
+
+.redeem-access-title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+}
+
+.redeem-access-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.redeem-provider-panel {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+
+.redeem-provider-panel.error {
+  border-color: rgba(220, 53, 69, 0.2);
+  background: rgba(220, 53, 69, 0.04);
+}
+
+.redeem-provider-head {
+  display: grid;
+  gap: 6px;
+}
+
+.redeem-provider-json {
+  margin: 0;
+  max-height: 480px;
+  overflow: auto;
+  border-radius: 0.65rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .user-access-hero,
 .user-access-card {
   background: white;
@@ -1382,5 +1444,17 @@ textarea {
   .user-access-summary {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .redeem-access-shell {
+    padding: 18px 12px 28px;
+  }
+
+  .redeem-access-card {
+    padding: 18px;
+  }
+
+  .redeem-access-meta {
+    grid-template-columns: 1fr;
   }
 }
