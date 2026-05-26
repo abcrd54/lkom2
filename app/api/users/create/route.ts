@@ -1,4 +1,4 @@
-import { buildAbsoluteAccessLink } from "@/lib/access-links";
+import { buildPreferredUserLink } from "@/lib/access-links";
 import { requireAdminSession } from "@/lib/auth";
 import { assignUserToRedeemCode, getRedeemCodeByCode, normalizeImportedRedeemCode } from "@/lib/redeem-codes";
 import { createUser, createUserSchema, deleteUser } from "@/lib/users";
@@ -48,7 +48,9 @@ export async function POST(request: Request) {
 
     return jsonOk({
       user,
-      accessLink: buildAbsoluteAccessLink(origin, user.accessToken)
+      accessLink: buildPreferredUserLink(origin, user.accessToken, {
+        hasInbox: Boolean(user.mailAccountId)
+      })
     });
   } catch (error) {
     return jsonError(getErrorMessage(error), 400);

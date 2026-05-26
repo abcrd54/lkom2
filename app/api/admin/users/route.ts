@@ -1,4 +1,4 @@
-import { buildAbsoluteAccessLink } from "@/lib/access-links";
+import { buildPreferredUserLink } from "@/lib/access-links";
 import { requireAdminSession } from "@/lib/auth";
 import { getErrorMessage, jsonError, jsonOk } from "@/lib/http";
 import { getRequestOrigin } from "@/lib/request";
@@ -13,7 +13,9 @@ export async function GET(request: Request) {
     return jsonOk({
       items: users.map((user) => ({
         ...user,
-        accessLink: buildAbsoluteAccessLink(origin, user.accessToken)
+        accessLink: buildPreferredUserLink(origin, user.accessToken, {
+          hasInbox: Boolean(user.mailAccountId)
+        })
       }))
     });
   } catch (error) {

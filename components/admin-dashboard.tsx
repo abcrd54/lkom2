@@ -196,8 +196,8 @@ function userProviderLabel(provider: MailProvider | null) {
   return providerLabel(provider);
 }
 
-function buildAccessPath(token: string) {
-  return `/u/${token}`;
+function buildUserPath(token: string, hasInbox: boolean) {
+  return hasInbox ? `/u/${token}` : `/r/${token}`;
 }
 
 function buildDashboardHref(
@@ -798,7 +798,9 @@ function ManageUserSection({
 
   async function handleCopyAccessLink(token: string, userId: string) {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${buildAccessPath(token)}`);
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${buildUserPath(token, Boolean(users?.items.find((item) => item.id === userId)?.mailAccountId))}`
+      );
       setCopiedAccessUserId(userId);
       window.setTimeout(() => {
         setCopiedAccessUserId((current) => (current === userId ? null : current));
@@ -1089,7 +1091,7 @@ function ManageUserSection({
                   </td>
                   <td>
                     <div className="access-link-cell">
-                      <span>{buildAccessPath(user.accessToken)}</span>
+                      <span>{buildUserPath(user.accessToken, Boolean(user.mailAccountId))}</span>
                       <button
                         className="mini-button"
                         onClick={() => handleCopyAccessLink(user.accessToken, user.id)}

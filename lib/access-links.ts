@@ -35,3 +35,15 @@ export function buildRedeemPath(token: string) {
 export function buildAbsoluteRedeemLink(origin: string, token: string) {
   return new URL(buildRedeemPath(token), origin).toString();
 }
+
+export function buildPreferredUserPath(token: string, options?: { hasInbox?: boolean | null }) {
+  return options?.hasInbox === false ? buildRedeemPath(token) : buildAccessPath(token);
+}
+
+export function buildPreferredUserLink(
+  origin: string,
+  token: string,
+  options?: { hasInbox?: boolean | null }
+) {
+  return new URL(buildPreferredUserPath(token, options), origin).toString();
+}
