@@ -407,11 +407,20 @@ async function getRecipientsByIds(recipientUserIds: string[], options?: { exclud
 }
 
 async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["recipients"]) {
-  const rawRecipients = (Array.isArray(sourceRecipients) ? sourceRecipients : []).filter(
-    (recipient): recipient is PartialLoggedRecipient =>
-      typeof recipient?.name === "string" &&
-      typeof recipient?.phoneNumber === "string"
-  );
+  const rawRecipients = (Array.isArray(sourceRecipients) ? sourceRecipients : [])
+    .map((recipient) => ({
+      userId: typeof recipient?.userId === "string" ? recipient.userId : undefined,
+      name: typeof recipient?.name === "string" ? recipient.name : "",
+      phoneNumber: typeof recipient?.phoneNumber === "string" ? recipient.phoneNumber : "",
+      accessLink: typeof recipient?.accessLink === "string" ? recipient.accessLink : undefined,
+      email: typeof recipient?.email === "string" ? recipient.email : undefined,
+      redeemCode:
+        typeof recipient?.redeemCode === "string" || recipient?.redeemCode === null
+          ? recipient.redeemCode
+          : undefined,
+      redeemLink: typeof recipient?.redeemLink === "string" ? recipient.redeemLink : undefined
+    }))
+    .filter((recipient) => recipient.name && recipient.phoneNumber);
 
   if (rawRecipients.length === 0) {
     return [];
