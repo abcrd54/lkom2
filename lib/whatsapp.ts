@@ -7,6 +7,20 @@ import {
 import { env } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+function normalizeWhatsappPhoneNumber(phoneNumber: string) {
+  const digitsOnly = phoneNumber.replace(/\D/g, "");
+
+  if (digitsOnly.startsWith("0")) {
+    return `62${digitsOnly.slice(1)}`;
+  }
+
+  if (digitsOnly.startsWith("62")) {
+    return digitsOnly;
+  }
+
+  return digitsOnly;
+}
+
 export const createWhatsappTemplateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   message: z.string().trim().min(1).max(60000)
@@ -319,7 +333,14 @@ async function listSentWhatsappRecipientUserIds() {
     ((data ?? []) as Array<{ recipients: WhatsappLogRow["recipients"] }>).flatMap((row) =>
       Array.isArray(row.recipients)
         ? row.recipients
-            .map((recipient) => recipient.userId)
+            .map((recipient) => {
+              const value = recipient as Record<string, unknown>;
+              return typeof value.userId === "string"
+                ? value.userId
+                : typeof value.id === "string"
+                  ? value.id
+                  : null;
+            })
             .filter((userId): userId is string => typeof userId === "string" && userId.length > 0)
         : []
     )
@@ -391,7 +412,7 @@ async function queryRecipients(options?: {
     .map((row) => ({
       id: row.id,
       name: row.name,
-      phoneNumber: row.phone_number,
+      phoneNumber: normalizeWhatsappPhoneNumber(row.phone_number),
       email: getDisplayEmail(row),
       accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
       redeemCode: getLatestRedeemCode(row.redeem_code_users),
@@ -408,10 +429,20 @@ async function getRecipientsByIds(recipientUserIds: string[], options?: { exclud
 
 async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["recipients"]) {
   const rawRecipients = (Array.isArray(sourceRecipients) ? sourceRecipients : [])
-    .map((recipient) => ({
-      userId: typeof recipient?.userId === "string" ? recipient.userId : undefined,
+    .map((recipient) => {
+      const value = recipient as Record<string, unknown>;
+      return {
+      userId:
+        typeof value.userId === "string"
+          ? value.userId
+          : typeof value.id === "string"
+            ? value.id
+            : undefined,
       name: typeof recipient?.name === "string" ? recipient.name : "",
-      phoneNumber: typeof recipient?.phoneNumber === "string" ? recipient.phoneNumber : "",
+      phoneNumber:
+        typeof recipient?.phoneNumber === "string"
+          ? normalizeWhatsappPhoneNumber(recipient.phoneNumber)
+          : "",
       accessLink: typeof recipient?.accessLink === "string" ? recipient.accessLink : undefined,
       email: typeof recipient?.email === "string" ? recipient.email : undefined,
       redeemCode:
@@ -419,7 +450,8 @@ async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["reci
           ? recipient.redeemCode
           : undefined,
       redeemLink: typeof recipient?.redeemLink === "string" ? recipient.redeemLink : undefined
-    }))
+    };
+    })
     .filter((recipient) => recipient.name && recipient.phoneNumber);
 
   if (rawRecipients.length === 0) {
@@ -518,7 +550,15 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
       template_id: template.id,
       template_name: template.name,
       message: template.message,
-      recipients,
+      recipients: recipients.map((recipient) => ({
+        userId: recipient.id,
+        name: recipient.name,
+        phoneNumber: recipient.phoneNumber,
+        accessLink: recipient.accessLink,
+        email: recipient.email,
+        redeemCode: recipient.redeemCode,
+        redeemLink: recipient.redeemLink
+      })),
       recipient_count: recipients.length,
       status,
       provider_request_id:
