@@ -26,10 +26,6 @@ export const deleteUserSchema = z.object({
   userId: z.string().uuid()
 });
 
-export const regenerateLinkSchema = z.object({
-  userId: z.string().uuid()
-});
-
 type UserRow = {
   id: string;
   name: string;
@@ -350,31 +346,6 @@ export async function deleteUser(input: z.infer<typeof deleteUserSchema>) {
   }
 
   return { deleted: true };
-}
-
-export async function regenerateUserAccessLink(input: z.infer<typeof regenerateLinkSchema>) {
-  const supabase = createSupabaseAdminClient();
-  const accessToken = generateAccessToken();
-  const accessTokenEncrypted = encryptAccessToken(accessToken);
-  const accessTokenHash = hashAccessToken(accessToken);
-
-  const { data, error } = await supabase
-    .from("users")
-    .update({
-      access_token_encrypted: accessTokenEncrypted,
-      access_token_hash: accessTokenHash
-    })
-    .eq("id", input.userId)
-    .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
-    )
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return mapUserRow(data as unknown as UserRow);
 }
 
 export async function getUserByAccessToken(token: string) {

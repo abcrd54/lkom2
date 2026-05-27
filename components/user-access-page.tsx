@@ -255,7 +255,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
           <span className="user-access-kicker">Access</span>
           <h1 className="user-access-title">Link is not active.</h1>
           <p className="user-access-copy">
-            This access link is invalid, expired, or disabled by admin.
+            This access link is invalid or has been disabled by admin.
           </p>
         </div>
       </section>

@@ -12,7 +12,7 @@ export async function GET(
   const result = await queryRedeemAccess(token, { refreshOtp });
 
   if (!result) {
-    return jsonError("Link redeem tidak aktif.", 404);
+    return jsonError("Link redeem tidak valid atau sudah dinonaktifkan admin.", 404);
   }
 
   return jsonOk(result);
