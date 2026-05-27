@@ -129,7 +129,7 @@ type LoggedRecipient = {
 };
 
 type PartialLoggedRecipient = {
-  userId: string;
+  userId?: string;
   name: string;
   phoneNumber: string;
   accessLink?: string;
@@ -351,6 +351,7 @@ async function getTemplateById(templateId: string) {
 
 async function queryRecipients(options?: {
   recipientUserIds?: string[];
+  recipientPhoneNumbers?: string[];
   limit?: number;
   excludeSent?: boolean;
 }) {
@@ -364,6 +365,10 @@ async function queryRecipients(options?: {
 
   if (options?.recipientUserIds?.length) {
     query = query.in("id", options.recipientUserIds);
+  }
+
+  if (options?.recipientPhoneNumbers?.length) {
+    query = query.in("phone_number", options.recipientPhoneNumbers);
   }
 
   if (typeof options?.limit === "number") {
@@ -404,8 +409,6 @@ async function getRecipientsByIds(recipientUserIds: string[], options?: { exclud
 async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["recipients"]) {
   const rawRecipients = (Array.isArray(sourceRecipients) ? sourceRecipients : []).filter(
     (recipient): recipient is PartialLoggedRecipient =>
-      typeof recipient?.userId === "string" &&
-      recipient.userId.length > 0 &&
       typeof recipient?.name === "string" &&
       typeof recipient?.phoneNumber === "string"
   );
@@ -414,19 +417,28 @@ async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["reci
     return [];
   }
 
-  const currentRecipients = await getRecipientsByIds(rawRecipients.map((recipient) => recipient.userId), {
+  const currentRecipients = await queryRecipients({
+    recipientUserIds: rawRecipients
+      .map((recipient) => recipient.userId)
+      .filter((userId): userId is string => typeof userId === "string" && userId.length > 0),
+    recipientPhoneNumbers: rawRecipients.map((recipient) => recipient.phoneNumber),
     excludeSent: false
   });
   const currentRecipientMap = new Map(
     currentRecipients.map((recipient) => [recipient.id, recipient] as const)
   );
+  const currentRecipientByPhoneMap = new Map(
+    currentRecipients.map((recipient) => [recipient.phoneNumber, recipient] as const)
+  );
 
   return rawRecipients
     .map((recipient) => {
-      const currentRecipient = currentRecipientMap.get(recipient.userId);
+      const currentRecipient =
+        (recipient.userId ? currentRecipientMap.get(recipient.userId) : null) ??
+        currentRecipientByPhoneMap.get(recipient.phoneNumber);
 
       return {
-        userId: recipient.userId,
+        userId: currentRecipient?.id ?? recipient.userId ?? recipient.phoneNumber,
         name: currentRecipient?.name ?? recipient.name,
         phoneNumber: currentRecipient?.phoneNumber ?? recipient.phoneNumber,
         accessLink: recipient.accessLink ?? currentRecipient?.accessLink ?? "",
