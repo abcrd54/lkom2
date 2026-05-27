@@ -128,6 +128,16 @@ type LoggedRecipient = {
   redeemLink: string;
 };
 
+type PartialLoggedRecipient = {
+  userId: string;
+  name: string;
+  phoneNumber: string;
+  accessLink?: string;
+  email?: string;
+  redeemCode?: string | null;
+  redeemLink?: string;
+};
+
 function getInboxEmail(relation: RecipientRow["mail_accounts"]): string {
   const mailAccount = Array.isArray(relation) ? (relation[0] ?? null) : relation ?? null;
   return mailAccount?.email_address ?? "";
@@ -393,6 +403,44 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
     }));
 }
 
+async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["recipients"]) {
+  const rawRecipients = (Array.isArray(sourceRecipients) ? sourceRecipients : []).filter(
+    (recipient): recipient is PartialLoggedRecipient =>
+      typeof recipient?.userId === "string" &&
+      recipient.userId.length > 0 &&
+      typeof recipient?.name === "string" &&
+      typeof recipient?.phoneNumber === "string"
+  );
+
+  if (rawRecipients.length === 0) {
+    return [];
+  }
+
+  const currentRecipients = await getRecipientsByIds(rawRecipients.map((recipient) => recipient.userId));
+  const currentRecipientMap = new Map(
+    currentRecipients.map((recipient) => [recipient.id, recipient] as const)
+  );
+
+  return rawRecipients
+    .map((recipient) => {
+      const currentRecipient = currentRecipientMap.get(recipient.userId);
+
+      return {
+        userId: recipient.userId,
+        name: currentRecipient?.name ?? recipient.name,
+        phoneNumber: currentRecipient?.phoneNumber ?? recipient.phoneNumber,
+        accessLink: recipient.accessLink ?? currentRecipient?.accessLink ?? "",
+        email: recipient.email ?? currentRecipient?.email ?? "",
+        redeemCode:
+          recipient.redeemCode !== undefined
+            ? recipient.redeemCode
+            : (currentRecipient?.redeemCode ?? null),
+        redeemLink: recipient.redeemLink ?? currentRecipient?.redeemLink ?? ""
+      } satisfies LoggedRecipient;
+    })
+    .filter((recipient) => recipient.accessLink && recipient.redeemLink);
+}
+
 export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSchema>) {
   if (!env.FONNTE_TOKEN) {
     throw new Error("FONNTE_TOKEN is not configured.");
@@ -494,16 +542,7 @@ export async function resendWhatsappLog(input: z.infer<typeof resendWhatsappLogS
     throw new Error("Selected WhatsApp log was not found.");
   }
 
-  const recipients = (Array.isArray(sourceLog.recipients) ? sourceLog.recipients : []).filter(
-    (recipient): recipient is LoggedRecipient =>
-      typeof recipient?.userId === "string" &&
-      typeof recipient?.name === "string" &&
-      typeof recipient?.phoneNumber === "string" &&
-      typeof recipient?.accessLink === "string" &&
-      typeof recipient?.email === "string" &&
-      (typeof recipient?.redeemCode === "string" || recipient?.redeemCode === null) &&
-      typeof recipient?.redeemLink === "string"
-  );
+  const recipients = await resolveRecipientsForResend(sourceLog.recipients);
 
   if (recipients.length === 0) {
     throw new Error("Selected WhatsApp log does not contain resendable recipients.");
