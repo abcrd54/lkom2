@@ -327,35 +327,11 @@ async function listSentWhatsappRecipientUserIds() {
 }
 
 export async function listWhatsappRecipients() {
-  const sentRecipientUserIds = await listSentWhatsappRecipientUserIds();
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("users")
-    .select(
-      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), sub_mail_accounts(display_email), redeem_code_users(assigned_at, redeem_codes(code))"
-    )
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (error) {
-    throw error;
-  }
-
-  const origin = env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-
-  return ((data ?? []) as RecipientRow[])
-    .filter((row) => !sentRecipientUserIds.has(row.id))
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      phoneNumber: row.phone_number,
-      status: row.status,
-      email: getDisplayEmail(row),
-      accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
-      redeemCode: getLatestRedeemCode(row.redeem_code_users),
-      redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
-    }));
+  const recipients = await queryRecipients({ limit: 100, excludeSent: true });
+  return recipients.map((recipient) => ({
+    ...recipient,
+    status: "active" as const
+  }));
 }
 
 async function getTemplateById(templateId: string) {
@@ -373,25 +349,40 @@ async function getTemplateById(templateId: string) {
   return data;
 }
 
-async function getRecipientsByIds(recipientUserIds: string[]) {
-  const sentRecipientUserIds = await listSentWhatsappRecipientUserIds();
+async function queryRecipients(options?: {
+  recipientUserIds?: string[];
+  limit?: number;
+  excludeSent?: boolean;
+}) {
   const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("users")
     .select(
       "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), sub_mail_accounts(display_email), redeem_code_users(assigned_at, redeem_codes(code))"
     )
-    .in("id", recipientUserIds)
     .eq("status", "active");
+
+  if (options?.recipientUserIds?.length) {
+    query = query.in("id", options.recipientUserIds);
+  }
+
+  if (typeof options?.limit === "number") {
+    query = query.limit(options.limit);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
   }
 
   const origin = env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const sentRecipientUserIds = options?.excludeSent
+    ? await listSentWhatsappRecipientUserIds()
+    : null;
 
   return ((data ?? []) as RecipientRow[])
-    .filter((row) => !sentRecipientUserIds.has(row.id))
+    .filter((row) => !sentRecipientUserIds?.has(row.id))
     .map((row) => ({
       id: row.id,
       name: row.name,
@@ -401,6 +392,13 @@ async function getRecipientsByIds(recipientUserIds: string[]) {
       redeemCode: getLatestRedeemCode(row.redeem_code_users),
       redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))
     }));
+}
+
+async function getRecipientsByIds(recipientUserIds: string[], options?: { excludeSent?: boolean }) {
+  return queryRecipients({
+    recipientUserIds,
+    excludeSent: options?.excludeSent ?? true
+  });
 }
 
 async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["recipients"]) {
@@ -416,7 +414,9 @@ async function resolveRecipientsForResend(sourceRecipients: WhatsappLogRow["reci
     return [];
   }
 
-  const currentRecipients = await getRecipientsByIds(rawRecipients.map((recipient) => recipient.userId));
+  const currentRecipients = await getRecipientsByIds(rawRecipients.map((recipient) => recipient.userId), {
+    excludeSent: false
+  });
   const currentRecipientMap = new Map(
     currentRecipients.map((recipient) => [recipient.id, recipient] as const)
   );
@@ -451,7 +451,7 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
     throw new Error("Selected WhatsApp template was not found.");
   }
 
-  const recipients = await getRecipientsByIds(input.recipientUserIds);
+  const recipients = await getRecipientsByIds(input.recipientUserIds, { excludeSent: true });
 
   if (recipients.length !== input.recipientUserIds.length) {
     throw new Error("One or more selected recipients are invalid, inactive, or already sent.");
