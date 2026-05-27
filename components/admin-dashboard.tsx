@@ -138,6 +138,10 @@ type AdminDashboardProps = {
       userId: string;
       name: string;
       phoneNumber: string;
+      accessLink?: string;
+      email?: string;
+      redeemCode?: string | null;
+      redeemLink?: string;
     }>;
     recipientCount: number;
     status: "queued" | "sent" | "failed" | "partial";
@@ -1412,6 +1416,8 @@ function WhatsappSection({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sendFeedback, setSendFeedback] = useState<string | null>(null);
   const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
+  const [resendLogId, setResendLogId] = useState<string | null>(null);
+  const [isResendingWhatsapp, setIsResendingWhatsapp] = useState(false);
   const selectedTemplate =
     templates.find((template) => template.id === selectedTemplateId) ?? null;
   const recipientMode = (() => {
@@ -1453,6 +1459,7 @@ function WhatsappSection({
   const selectedRecipients = templateRecipients.filter((recipient) =>
     selectedRecipientIds.includes(recipient.id)
   );
+  const resendLog = logs.find((log) => log.id === resendLogId) ?? null;
 
   useEffect(() => {
     setRecipientSearch("");
@@ -1466,23 +1473,42 @@ function WhatsappSection({
   }
 
   function renderWhatsappTemplatePreview(
+    templateName: string,
     message: string,
     recipient: {
       name: string;
       phoneNumber: string;
-      email: string;
-      accessLink: string;
-      redeemCode: string | null;
-      redeemLink: string;
+      email?: string;
+      accessLink?: string;
+      redeemCode?: string | null;
+      redeemLink?: string;
     }
   ) {
+    const previewMode = (() => {
+      const normalizedTemplateName = templateName.trim().toLowerCase();
+
+      if (normalizedTemplateName === "kode") {
+        return "redeem" as const;
+      }
+
+      if (normalizedTemplateName === "wa email") {
+        return "email" as const;
+      }
+
+      return "all" as const;
+    })();
+    const primaryLink =
+      previewMode === "redeem"
+        ? recipient.redeemLink ?? recipient.accessLink ?? "-"
+        : recipient.accessLink ?? recipient.redeemLink ?? "-";
+
     return message
       .replaceAll("{name}", recipient.name)
       .replaceAll("{phone}", recipient.phoneNumber)
       .replaceAll("{email}", recipient.email || "-")
-      .replaceAll("{link}", recipient.accessLink)
+      .replaceAll("{link}", primaryLink)
       .replaceAll("{code}", recipient.redeemCode ?? "-")
-      .replaceAll("{redeem_link}", recipient.redeemLink);
+      .replaceAll("{redeem_link}", recipient.redeemLink ?? recipient.accessLink ?? "-");
   }
 
   function toggleRecipient(recipientId: string) {
@@ -1505,6 +1531,20 @@ function WhatsappSection({
 
   function clearSelectedRecipients() {
     setSelectedRecipientIds([]);
+  }
+
+  function openResendModal(logId: string) {
+    setResendLogId(logId);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
+  }
+
+  function closeResendModal() {
+    if (isResendingWhatsapp) {
+      return;
+    }
+
+    setResendLogId(null);
   }
 
   function handleEditTemplate(template: {
@@ -1628,6 +1668,43 @@ function WhatsappSection({
       );
     } finally {
       setIsSendingWhatsapp(false);
+    }
+  }
+
+  async function handleResendWhatsapp() {
+    if (!resendLog) {
+      return;
+    }
+
+    setIsResendingWhatsapp(true);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
+
+    try {
+      const response = await fetch("/api/whatsapp/resend", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          logId: resendLog.id
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to resend WhatsApp message.");
+      }
+
+      setSendFeedback(payload.data.detail ?? "WhatsApp message queued.");
+      setResendLogId(null);
+      router.refresh();
+    } catch (error) {
+      setSendErrorMessage(
+        error instanceof Error ? error.message : "Failed to resend WhatsApp message."
+      );
+    } finally {
+      setIsResendingWhatsapp(false);
     }
   }
 
@@ -1783,7 +1860,7 @@ function WhatsappSection({
                       {recipient.name} | {recipient.phoneNumber}
                     </p>
                     <pre className="template-preview-message">
-                      {renderWhatsappTemplatePreview(selectedTemplate.message, recipient)}
+                      {renderWhatsappTemplatePreview(selectedTemplate.name, selectedTemplate.message, recipient)}
                     </pre>
                   </article>
                 ))}
@@ -1874,6 +1951,7 @@ function WhatsappSection({
                 <th>Recipients</th>
                 <th>Status</th>
                 <th>Request ID</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -1906,17 +1984,85 @@ function WhatsappSection({
                       </span>
                     </td>
                     <td>{log.providerRequestId ?? "-"}</td>
+                    <td>
+                      <button
+                        className="button secondary"
+                        onClick={() => openResendModal(log.id)}
+                        type="button"
+                      >
+                        Resend
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5}>No WhatsApp logs yet.</td>
+                  <td colSpan={6}>No WhatsApp logs yet.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </section>
+      {resendLog ? (
+        <div className="modal-backdrop" onClick={closeResendModal} role="presentation">
+          <div
+            className="modal-card"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-head">
+              <div>
+                <h3>Preview Resend</h3>
+                <p>{resendLog.templateName} | {resendLog.recipients.length} recipient(s)</p>
+              </div>
+              <button className="modal-close" onClick={closeResendModal} type="button">
+                Close
+              </button>
+            </div>
+            <div className="form-grid modal-form">
+              <div className="template-preview-block">
+                <div className="template-preview-head">
+                  <strong>Template Preview</strong>
+                  <span>{resendLog.templateName}</span>
+                </div>
+                <div className="template-preview-grid">
+                  {resendLog.recipients.map((recipient) => (
+                    <article className="template-preview-card" key={`${resendLog.id}-${recipient.userId}`}>
+                      <p className="micro">
+                        {recipient.name} | {recipient.phoneNumber}
+                      </p>
+                      <pre className="template-preview-message">
+                        {renderWhatsappTemplatePreview(resendLog.templateName, resendLog.message, recipient)}
+                      </pre>
+                    </article>
+                  ))}
+                </div>
+              </div>
+              {sendErrorMessage ? <p className="form-feedback error">{sendErrorMessage}</p> : null}
+              <div className="button-row">
+                <button
+                  className="button"
+                  disabled={isResendingWhatsapp}
+                  onClick={handleResendWhatsapp}
+                  type="button"
+                >
+                  {isResendingWhatsapp ? "Resending..." : "Confirm Resend"}
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={isResendingWhatsapp}
+                  onClick={closeResendModal}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

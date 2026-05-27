@@ -25,6 +25,10 @@ export const sendWhatsappSchema = z.object({
   recipientUserIds: z.array(z.string().uuid()).min(1).max(10)
 });
 
+export const resendWhatsappLogSchema = z.object({
+  logId: z.string().uuid()
+});
+
 type WhatsappTemplateRow = {
   id: string;
   name: string;
@@ -42,6 +46,7 @@ type WhatsappLogRow = {
     userId: string;
     name: string;
     phoneNumber: string;
+    accessLink?: string;
     email?: string;
     redeemCode?: string | null;
     redeemLink?: string;
@@ -88,6 +93,39 @@ type RecipientRow = {
           | null;
       }>
     | null;
+};
+
+function getWhatsappTemplateRecipientMode(templateName: string | null | undefined) {
+  const normalizedName = templateName?.trim().toLowerCase();
+
+  if (normalizedName === "kode") {
+    return "redeem";
+  }
+
+  if (normalizedName === "wa email") {
+    return "email";
+  }
+
+  return "all";
+}
+
+function getWhatsappPrimaryLink(templateName: string | null | undefined, recipient: {
+  accessLink: string;
+  redeemLink: string;
+}) {
+  return getWhatsappTemplateRecipientMode(templateName) === "redeem"
+    ? recipient.redeemLink
+    : recipient.accessLink;
+}
+
+type LoggedRecipient = {
+  userId: string;
+  name: string;
+  phoneNumber: string;
+  accessLink: string;
+  email: string;
+  redeemCode: string | null;
+  redeemLink: string;
 };
 
 function getInboxEmail(relation: RecipientRow["mail_accounts"]): string {
@@ -233,6 +271,27 @@ export async function listWhatsappLogs(limit = 50) {
   }));
 }
 
+async function getWhatsappLogById(logId: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("whatsapp_logs")
+    .select(
+      "id, template_id, template_name, message, recipients, recipient_count, status, provider_request_id, provider_response, created_at"
+    )
+    .eq("id", logId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return data as WhatsappLogRow;
+}
+
 async function listSentWhatsappRecipientUserIds() {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
@@ -352,8 +411,10 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
 
   const target = recipients
     .map(
-      (recipient) =>
-        `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${recipient.accessLink}|${recipient.redeemCode ?? "-"}|${recipient.email || "-"}|${recipient.redeemLink}`
+      (recipient) => {
+        const primaryLink = getWhatsappPrimaryLink(template.name, recipient);
+        return `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${primaryLink}|${recipient.redeemCode ?? "-"}|${recipient.email || "-"}|${recipient.redeemLink}`;
+      }
     )
     .join(",");
   const formData = new FormData();
@@ -413,6 +474,104 @@ export async function sendWhatsappCampaign(input: z.infer<typeof sendWhatsappSch
         : typeof payload?.reason === "string"
           ? payload.reason
           : "Fonnte send failed.";
+    throw new Error(detail);
+  }
+
+  return {
+    log: logRow as WhatsappLogRow,
+    detail: typeof payload?.detail === "string" ? payload.detail : "WhatsApp message queued."
+  };
+}
+
+export async function resendWhatsappLog(input: z.infer<typeof resendWhatsappLogSchema>) {
+  if (!env.FONNTE_TOKEN) {
+    throw new Error("FONNTE_TOKEN is not configured.");
+  }
+
+  const sourceLog = await getWhatsappLogById(input.logId);
+
+  if (!sourceLog) {
+    throw new Error("Selected WhatsApp log was not found.");
+  }
+
+  const recipients = (Array.isArray(sourceLog.recipients) ? sourceLog.recipients : []).filter(
+    (recipient): recipient is LoggedRecipient =>
+      typeof recipient?.userId === "string" &&
+      typeof recipient?.name === "string" &&
+      typeof recipient?.phoneNumber === "string" &&
+      typeof recipient?.accessLink === "string" &&
+      typeof recipient?.email === "string" &&
+      (typeof recipient?.redeemCode === "string" || recipient?.redeemCode === null) &&
+      typeof recipient?.redeemLink === "string"
+  );
+
+  if (recipients.length === 0) {
+    throw new Error("Selected WhatsApp log does not contain resendable recipients.");
+  }
+
+  const target = recipients
+    .map((recipient) => {
+      const primaryLink = getWhatsappPrimaryLink(sourceLog.template_name, recipient);
+      return `${recipient.phoneNumber}|${recipient.name}|${recipient.phoneNumber}|${primaryLink}|${recipient.redeemCode ?? "-"}|${recipient.email || "-"}|${recipient.redeemLink}`;
+    })
+    .join(",");
+  const formData = new FormData();
+  formData.set("target", target);
+  formData.set(
+    "message",
+    sourceLog.message
+      .replaceAll("{phone}", "{var1}")
+      .replaceAll("{link}", "{var2}")
+      .replaceAll("{code}", "{var3}")
+      .replaceAll("{email}", "{var4}")
+      .replaceAll("{redeem_link}", "{var5}")
+  );
+  formData.set("countryCode", "0");
+
+  const response = await fetch("https://api.fonnte.com/send", {
+    method: "POST",
+    headers: {
+      Authorization: env.FONNTE_TOKEN
+    },
+    body: formData
+  });
+
+  const payload = await response.json();
+  const isSuccess = response.ok && payload?.status === true;
+  const status: "queued" | "failed" | "partial" | "sent" = isSuccess ? "sent" : "failed";
+
+  const supabase = createSupabaseAdminClient();
+  const { data: logRow, error: logError } = await supabase
+    .from("whatsapp_logs")
+    .insert({
+      template_id: sourceLog.template_id,
+      template_name: sourceLog.template_name,
+      message: sourceLog.message,
+      recipients,
+      recipient_count: recipients.length,
+      status,
+      provider_request_id:
+        typeof payload?.requestid === "number" || typeof payload?.requestid === "string"
+          ? String(payload.requestid)
+          : null,
+      provider_response: payload
+    })
+    .select(
+      "id, template_id, template_name, message, recipients, recipient_count, status, provider_request_id, provider_response, created_at"
+    )
+    .single();
+
+  if (logError) {
+    throw logError;
+  }
+
+  if (!isSuccess) {
+    const detail =
+      typeof payload?.detail === "string"
+        ? payload.detail
+        : typeof payload?.reason === "string"
+          ? payload.reason
+          : "Fonnte resend failed.";
     throw new Error(detail);
   }
 
