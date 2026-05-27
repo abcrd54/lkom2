@@ -1412,8 +1412,34 @@ function WhatsappSection({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sendFeedback, setSendFeedback] = useState<string | null>(null);
   const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
+  const selectedTemplate =
+    templates.find((template) => template.id === selectedTemplateId) ?? null;
+  const recipientMode = (() => {
+    const normalizedTemplateName = selectedTemplate?.name.trim().toLowerCase();
 
-  const filteredRecipients = recipients.filter((recipient) => {
+    if (normalizedTemplateName === "kode") {
+      return "redeem" as const;
+    }
+
+    if (normalizedTemplateName === "wa email") {
+      return "email" as const;
+    }
+
+    return "all" as const;
+  })();
+  const templateRecipients = recipients.filter((recipient) => {
+    if (recipientMode === "redeem") {
+      return Boolean(recipient.redeemCode);
+    }
+
+    if (recipientMode === "email") {
+      return Boolean(recipient.email.trim());
+    }
+
+    return true;
+  });
+
+  const filteredRecipients = templateRecipients.filter((recipient) => {
     const query = recipientSearch.trim().toLowerCase();
     if (!query) {
       return true;
@@ -1424,11 +1450,14 @@ function WhatsappSection({
       recipient.phoneNumber.toLowerCase().includes(query)
     );
   });
-  const selectedTemplate =
-    templates.find((template) => template.id === selectedTemplateId) ?? null;
-  const selectedRecipients = recipients.filter((recipient) =>
+  const selectedRecipients = templateRecipients.filter((recipient) =>
     selectedRecipientIds.includes(recipient.id)
   );
+
+  useEffect(() => {
+    setRecipientSearch("");
+    setSelectedRecipientIds(templateRecipients.slice(0, 10).map((recipient) => recipient.id));
+  }, [selectedTemplateId, recipientMode, recipients]);
 
   function resetTemplateForm() {
     setTemplateName("");
@@ -1729,24 +1758,35 @@ function WhatsappSection({
             </select>
           </div>
           {selectedTemplate ? (
+            <p className="micro">
+              {recipientMode === "redeem"
+                ? "Template KODE otomatis memfilter dan memilih user redeem."
+                : recipientMode === "email"
+                  ? "Template WA EMAIL otomatis memfilter dan memilih user yang punya inbox/email."
+                  : "Template ini menampilkan semua recipient aktif."}
+            </p>
+          ) : null}
+          {selectedTemplate ? (
             <div className="template-preview-block">
               <div className="template-preview-head">
                 <strong>Template Preview</strong>
                 <span>{selectedTemplate.name}</span>
               </div>
               <div className="template-preview-grid">
-                {(selectedRecipients.length > 0 ? selectedRecipients : recipients.slice(0, 1)).map(
-                  (recipient) => (
-                    <article className="template-preview-card" key={recipient.id}>
-                      <p className="micro">
-                        {recipient.name} | {recipient.phoneNumber}
-                      </p>
-                      <pre className="template-preview-message">
-                        {renderWhatsappTemplatePreview(selectedTemplate.message, recipient)}
-                      </pre>
-                    </article>
-                  )
-                )}
+                {(
+                  selectedRecipients.length > 0
+                    ? selectedRecipients
+                    : templateRecipients.slice(0, 1)
+                ).map((recipient) => (
+                  <article className="template-preview-card" key={recipient.id}>
+                    <p className="micro">
+                      {recipient.name} | {recipient.phoneNumber}
+                    </p>
+                    <pre className="template-preview-message">
+                      {renderWhatsappTemplatePreview(selectedTemplate.message, recipient)}
+                    </pre>
+                  </article>
+                ))}
               </div>
             </div>
           ) : null}
