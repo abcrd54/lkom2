@@ -111,7 +111,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
 
       event.preventDefault();
       event.returnValue =
-        "Refresh manual atau menutup halaman bisa membuat Anda kehilangan konteks sesi OTP. Lanjutkan?";
+        "Jangan reload manual. Gunakan tombol Refresh di halaman ini agar sesi OTP tetap konsisten.";
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -349,6 +349,10 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
                   <strong>{formatSessionStartedAt(sessionStartedAt)}</strong>.
                 </p>
               ) : null}
+              <p className="user-access-copy">
+                Jangan reload halaman secara manual. Jika halaman di-refresh lewat browser, sesi OTP
+                bisa berubah konteks. Gunakan tombol <strong>Refresh</strong> di bawah agar tetap aman.
+              </p>
               <p className="user-access-status">{formatUpdatedAgo()}</p>
             </>
           ) : (
