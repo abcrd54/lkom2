@@ -153,13 +153,76 @@ function renderTemplateValue(
     .replaceAll("{redeem_link}", recipient.redeemLink);
 }
 
-function renderEmailHtml(message: string) {
-  const escaped = message
+function escapeHtml(value: string) {
+  return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
 
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.7;color:#1f2d3d;white-space:pre-wrap;">${escaped}</div>`;
+function formatEmailInlineMarkup(value: string) {
+  const escaped = escapeHtml(value);
+  const withBold = escaped.replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>");
+
+  return withBold.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" style="color:#0f62fe;text-decoration:none;font-weight:700;">$1</a>'
+  );
+}
+
+function renderEmailBodyHtml(message: string) {
+  const normalized = message.replace(/\r\n/g, "\n").trim();
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks
+    .map((block) => {
+      const lines = block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      if (lines.length > 1 && lines.every((line) => /^\d+\./.test(line))) {
+        const items = lines
+          .map((line) => line.replace(/^\d+\.\s*/, ""))
+          .map((line) => `<li style="margin:0 0 8px;">${formatEmailInlineMarkup(line)}</li>`)
+          .join("");
+        return `<ol style="margin:0;padding-left:20px;color:#3c4858;">${items}</ol>`;
+      }
+
+      const content = lines.map((line) => formatEmailInlineMarkup(line)).join("<br />");
+      const onlyLink =
+        lines.length === 1 && /^https?:\/\/\S+$/.test(lines[0])
+          ? `<div style="margin:4px 0 0;"><a href="${lines[0]}" style="display:inline-block;background:#0f62fe;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:12px;">Buka Akses</a></div>`
+          : "";
+
+      return `<p style="margin:0;color:#3c4858;font-size:15px;line-height:1.75;">${content}</p>${onlyLink}`;
+    })
+    .join('<div style="height:16px;line-height:16px;">&nbsp;</div>');
+}
+
+function renderEmailHtml(message: string) {
+  return `
+    <div style="margin:0;padding:32px 16px;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2d3d;">
+      <div style="max-width:640px;margin:0 auto;">
+        <div style="margin-bottom:16px;text-align:center;">
+          <div style="display:inline-block;padding:8px 14px;border-radius:999px;background:#e8f0ff;color:#0f62fe;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">LKOM Access</div>
+        </div>
+        <div style="background:#ffffff;border:1px solid #dbe4f0;border-radius:20px;box-shadow:0 10px 30px rgba(15,23,42,0.08);overflow:hidden;">
+          <div style="padding:28px 28px 18px;background:linear-gradient(135deg,#0f62fe,#3aa0ff);color:#ffffff;">
+            <h1 style="margin:0;font-size:24px;line-height:1.2;font-weight:800;">Akses Login Anda</h1>
+            <p style="margin:10px 0 0;font-size:14px;line-height:1.7;color:rgba(255,255,255,0.88);">Buka link akses, cek OTP terbaru, lalu lanjut login dengan email.</p>
+          </div>
+          <div style="padding:28px;">
+            ${renderEmailBodyHtml(message)}
+          </div>
+        </div>
+        <p style="margin:16px 0 0;text-align:center;color:#6b7785;font-size:12px;line-height:1.7;">Email ini dikirim otomatis oleh sistem LKOM.</p>
+      </div>
+    </div>
+  `;
 }
 
 async function sendResendEmail(input: {
