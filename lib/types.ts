@@ -21,6 +21,7 @@ export type MailAccount = {
 export type ManagedUser = {
   id: string;
   name: string;
+  email: string;
   phoneNumber: string;
   mailAccountId: string | null;
   subMailAccountId: string | null;

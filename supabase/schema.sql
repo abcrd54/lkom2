@@ -26,6 +26,7 @@ create table if not exists sub_mail_accounts (
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  email text,
   phone_number text not null,
   mail_account_id uuid references mail_accounts(id) on delete restrict,
   sub_mail_account_id uuid references sub_mail_accounts(id) on delete restrict,
@@ -72,6 +73,29 @@ create table if not exists whatsapp_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists email_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  subject text not null,
+  message text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists email_logs (
+  id uuid primary key default gen_random_uuid(),
+  template_id uuid references email_templates(id) on delete set null,
+  template_name text not null,
+  subject text not null,
+  message text not null,
+  recipients jsonb not null default '[]'::jsonb,
+  recipient_count integer not null default 0,
+  status text not null check (status in ('queued', 'sent', 'failed', 'partial')),
+  provider_request_id text,
+  provider_response jsonb,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists redeem_codes (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -90,6 +114,9 @@ create table if not exists redeem_code_users (
 
 alter table users
 add column if not exists sub_mail_account_id uuid;
+
+alter table users
+add column if not exists email text;
 
 do $$
 begin
@@ -134,6 +161,7 @@ alter column sub_mail_account_id drop not null;
 create index if not exists idx_users_mail_account_id on users(mail_account_id);
 create index if not exists idx_users_sub_mail_account_id on users(sub_mail_account_id);
 create unique index if not exists idx_users_phone_number_unique on users(phone_number);
+create unique index if not exists idx_users_email_unique on users(email);
 create index if not exists idx_sub_mail_accounts_mail_account_id on sub_mail_accounts(mail_account_id);
 create index if not exists idx_otp_messages_mail_account_id_received_at on otp_messages(mail_account_id, received_at desc);
 create index if not exists idx_redeem_code_users_redeem_code_id on redeem_code_users(redeem_code_id);
@@ -169,6 +197,12 @@ execute function set_updated_at();
 drop trigger if exists set_whatsapp_templates_updated_at on whatsapp_templates;
 create trigger set_whatsapp_templates_updated_at
 before update on whatsapp_templates
+for each row
+execute function set_updated_at();
+
+drop trigger if exists set_email_templates_updated_at on email_templates;
+create trigger set_email_templates_updated_at
+before update on email_templates
 for each row
 execute function set_updated_at();
 

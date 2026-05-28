@@ -36,6 +36,7 @@ type MailAccountView = {
 type UserView = {
   id: string;
   name: string;
+  email: string;
   phoneNumber: string;
   status: UserStatus;
   mailAccountId: string | null;
@@ -122,6 +123,44 @@ type AdminDashboardProps = {
     phoneNumber: string;
     status: UserStatus;
   }>;
+  emailTemplates?: Array<{
+    id: string;
+    name: string;
+    subject: string;
+    message: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  emailLogs?: Array<{
+    id: string;
+    templateId: string | null;
+    templateName: string;
+    subject: string;
+    message: string;
+    recipients: Array<{
+      userId: string;
+      name: string;
+      email: string;
+      phoneNumber?: string;
+      accessLink?: string;
+      redeemCode?: string | null;
+      redeemLink?: string;
+    }>;
+    recipientCount: number;
+    status: "queued" | "sent" | "failed" | "partial";
+    providerRequestId: string | null;
+    providerResponse: unknown;
+    createdAt: string;
+  }>;
+  emailRecipients?: Array<{
+    id: string;
+    name: string;
+    phoneNumber: string;
+    email: string;
+    accessLink: string;
+    redeemCode: string | null;
+    redeemLink: string;
+  }>;
   whatsappTemplates?: Array<{
     id: string;
     name: string;
@@ -167,6 +206,7 @@ const NAV_ITEMS: { id: DashboardTab; label: string }[] = [
   { id: "manage-user", label: "Manage User" },
   { id: "otp-inbox", label: "OTP Inbox" },
   { id: "redeem", label: "Redeem" },
+  { id: "email", label: "Kirim Email" },
   { id: "whatsapp", label: "Kirim WhatsApp" }
 ];
 
@@ -704,6 +744,7 @@ function ManageUserSection({
   const [modalMode, setModalMode] = useState<"single" | "bulk" | null>(null);
   const [userSearch, setUserSearch] = useState(users?.searchQuery ?? "");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [subMailAccountId, setSubMailAccountId] = useState("");
   const [codeRedeem, setCodeRedeem] = useState("");
@@ -712,7 +753,7 @@ function ManageUserSection({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdAccessLink, setCreatedAccessLink] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<
-    Array<{ name: string; phoneNumber: string; emailConnect: string; codeRedeem: string }>
+    Array<{ name: string; userEmail: string; phoneNumber: string; otpInbox: string; codeRedeem: string }>
   >([]);
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
@@ -731,16 +772,18 @@ function ManageUserSection({
     partial: Array<{
       row: number;
       name: string;
+      userEmail: string;
       phoneNumber: string;
-      emailConnect: string;
+      otpInbox: string;
       codeRedeem: string;
       reason: string;
     }>;
     failed: Array<{
       row: number;
       name: string;
+      userEmail: string;
       phoneNumber: string;
-      emailConnect: string;
+      otpInbox: string;
       codeRedeem: string;
       reason: string;
     }>;
@@ -765,6 +808,7 @@ function ManageUserSection({
 
       return (
         user.name.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query) ||
         user.phoneNumber.toLowerCase().includes(query) ||
         user.inboxAddress.toLowerCase().includes(query)
       );
@@ -772,6 +816,7 @@ function ManageUserSection({
 
   function resetSingleFormState() {
     setName("");
+    setEmail("");
     setPhoneNumber("");
     setSubMailAccountId("");
     setCodeRedeem("");
@@ -824,16 +869,21 @@ function ManageUserSection({
 
   function downloadTemplate() {
     const worksheet = XLSX.utils.aoa_to_sheet([
-      ["name", "phoneNumber", "email_connect", "code_redeem"],
-      ["", "", "", ""]
+      ["name", "user_email", "phoneNumber", "otp_inbox", "code_redeem"],
+      ["", "", "", "", ""]
     ]);
 
     worksheet["B2"] = {
+      t: "s",
+      v: "andi@example.com"
+    };
+    worksheet["C2"] = {
       t: "s",
       v: "628123456789"
     };
     worksheet["!cols"] = [
       { wch: 28 },
+      { wch: 30 },
       { wch: 20 },
       { wch: 32 },
       { wch: 24 }
@@ -841,9 +891,10 @@ function ManageUserSection({
 
     const noteSheet = XLSX.utils.aoa_to_sheet([
       ["Notes"],
+      ["user_email is the destination email used by the Email campaign menu."],
       ["Format phoneNumber as plain text and use the 628xxxx format."],
       ["Example: 628123456789"],
-      ["email_connect can be a parent Gmail, Sub-Gmail, or Microsoft inbox."],
+      ["otp_inbox can be a parent Gmail, Sub-Gmail, or Microsoft inbox."],
       ["Leave code_redeem empty unless the row should use a redeem code."]
     ]);
     noteSheet["!cols"] = [{ wch: 72 }];
@@ -889,12 +940,17 @@ function ManageUserSection({
 
         return {
           name: normalizedEntries.name ?? "",
+          userEmail:
+            normalizedEntries.useremail ??
+            normalizedEntries.email ??
+            normalizedEntries.contactemail ??
+            "",
           phoneNumber: normalizedEntries.phonenumber ?? "",
-          emailConnect:
+          otpInbox:
+            normalizedEntries.otpinbox ??
             normalizedEntries.emailconnect ??
             normalizedEntries.inboxemail ??
             normalizedEntries.inbox ??
-            normalizedEntries.email ??
             "",
           codeRedeem:
             normalizedEntries.coderedeem ??
@@ -903,7 +959,7 @@ function ManageUserSection({
             ""
         };
       })
-      .filter((row) => row.name || row.phoneNumber || row.emailConnect || row.codeRedeem);
+      .filter((row) => row.name || row.userEmail || row.phoneNumber || row.otpInbox || row.codeRedeem);
 
     if (parsedRows.length === 0) {
       throw new Error("Import file is empty or template headers are invalid.");
@@ -927,12 +983,12 @@ function ManageUserSection({
     }
 
     const invalidRow = parsedRows.find(
-      (row) => !row.name || !row.phoneNumber || (!row.emailConnect && !row.codeRedeem)
+      (row) => !row.name || !row.userEmail || !row.phoneNumber || (!row.otpInbox && !row.codeRedeem)
     );
 
     if (invalidRow) {
       throw new Error(
-        "Each import row must include name, phoneNumber, and at least one of email_connect or code_redeem."
+        "Each import row must include name, user_email, phoneNumber, and at least one of otp_inbox or code_redeem."
       );
     }
 
@@ -974,6 +1030,7 @@ function ManageUserSection({
         },
         body: JSON.stringify({
           name,
+          email,
           phoneNumber,
           subMailAccountId: subMailAccountId || null,
           codeRedeem
@@ -1000,6 +1057,7 @@ function ManageUserSection({
       setSuccessMessage(`User created: ${payload.data.user.name}`);
       setCreatedAccessLink(payload.data.accessLink);
       setName("");
+      setEmail("");
       setPhoneNumber("");
       setSubMailAccountId("");
       setCodeRedeem("");
@@ -1049,16 +1107,18 @@ function ManageUserSection({
               partial: Array<{
                 row: number;
                 name: string;
+                userEmail: string;
                 phoneNumber: string;
-                emailConnect: string;
+                otpInbox: string;
                 codeRedeem: string;
                 reason: string;
               }>;
               failed: Array<{
                 row: number;
                 name: string;
+                userEmail: string;
                 phoneNumber: string;
-                emailConnect: string;
+                otpInbox: string;
                 codeRedeem: string;
                 reason: string;
               }>;
@@ -1105,7 +1165,7 @@ function ManageUserSection({
           <input
             id="user-search"
             name="user-search"
-            placeholder="Search name, phone, or inbox"
+            placeholder="Search name, email, phone, or inbox"
             value={userSearch}
             onChange={(event) => setUserSearch(event.target.value)}
           />
@@ -1118,6 +1178,7 @@ function ManageUserSection({
             <tr>
               <th>No</th>
               <th>Nama</th>
+              <th>User Email</th>
               <th>Nomor HP</th>
               <th>Provider</th>
               <th>Inbox</th>
@@ -1131,6 +1192,7 @@ function ManageUserSection({
                 <tr key={user.id}>
                   <td>{rowNumberOffset + index + 1}</td>
                   <td>{user.name}</td>
+                  <td>{user.email || "-"}</td>
                   <td>{user.phoneNumber}</td>
                   <td>{userProviderLabel(user.provider)}</td>
                   <td>
@@ -1168,7 +1230,7 @@ function ManageUserSection({
               ))
             ) : (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   {users?.items.length ? "No users match your search." : "No users in database yet."}
                 </td>
               </tr>
@@ -1221,6 +1283,18 @@ function ManageUserSection({
                     placeholder="Andi Saputra"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="modal-email">User Email</label>
+                  <input
+                    id="modal-email"
+                    name="email"
+                    placeholder="andi@example.com"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
                     required
                   />
                 </div>
@@ -1302,12 +1376,14 @@ function ManageUserSection({
                 </div>
                 <div className="import-template-note">
                   Template headers:
-                  <code>name,phoneNumber,email_connect,code_redeem</code>
+                  <code>name,user_email,phoneNumber,otp_inbox,code_redeem</code>
                 </div>
                 <p className="micro">
-                  Use `email_connect` from any connected inbox address: parent Gmail, Sub-Gmail,
-                  or Microsoft inbox. Leave it empty only when `code_redeem` should be assigned to
-                  an existing user matched by phone number.
+                  Use `user_email` as the destination email for the Email campaign menu.
+                </p>
+                <p className="micro">
+                  Use `otp_inbox` from any connected inbox address: parent Gmail, Sub-Gmail,
+                  or Microsoft inbox. Leave it empty only when the row should create a redeem-only user.
                 </p>
                 <p className="micro">Use `phoneNumber` in `628xxxx` format and prefer the XLSX template.</p>
                 {bulkFileName ? (
@@ -1349,7 +1425,7 @@ function ManageUserSection({
                             key={`partial-${partialRow.row}-${partialRow.phoneNumber}-${partialRow.reason}`}
                           >
                             Partial Row {partialRow.row} | {partialRow.name} |{" "}
-                            {partialRow.phoneNumber} | {partialRow.emailConnect || "-"} |{" "}
+                            {partialRow.userEmail} | {partialRow.phoneNumber} | {partialRow.otpInbox || "-"} |{" "}
                             {partialRow.codeRedeem || "-"}: {partialRow.reason}
                           </p>
                         ))}
@@ -1362,8 +1438,8 @@ function ManageUserSection({
                             className="micro"
                             key={`${failedRow.row}-${failedRow.phoneNumber}-${failedRow.reason}`}
                           >
-                            Row {failedRow.row} | {failedRow.name} | {failedRow.phoneNumber} |{" "}
-                            {failedRow.emailConnect || "-"} | {failedRow.codeRedeem || "-"}:{" "}
+                            Row {failedRow.row} | {failedRow.name} | {failedRow.userEmail} | {failedRow.phoneNumber} |{" "}
+                            {failedRow.otpInbox || "-"} | {failedRow.codeRedeem || "-"}:{" "}
                             {failedRow.reason}
                           </p>
                         ))}
@@ -1390,6 +1466,678 @@ function ManageUserSection({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function EmailSection({
+  templates = [],
+  logs = [],
+  recipients = []
+}: {
+  templates?: NonNullable<AdminDashboardProps["emailTemplates"]>;
+  logs?: NonNullable<AdminDashboardProps["emailLogs"]>;
+  recipients?: NonNullable<AdminDashboardProps["emailRecipients"]>;
+}) {
+  const router = useRouter();
+  const [templateName, setTemplateName] = useState("");
+  const [templateSubject, setTemplateSubject] = useState("");
+  const [templateMessage, setTemplateMessage] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [recipientSearch, setRecipientSearch] = useState("");
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sendFeedback, setSendFeedback] = useState<string | null>(null);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
+  const [resendLogId, setResendLogId] = useState<string | null>(null);
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
+  const selectedTemplate =
+    templates.find((template) => template.id === selectedTemplateId) ?? null;
+  const recipientMode =
+    selectedTemplate?.name.trim().toLowerCase() === "kode"
+      ? ("redeem" as const)
+      : ("email" as const);
+  const templateRecipients = recipients.filter((recipient) => {
+    if (recipientMode === "redeem") {
+      return Boolean(recipient.redeemCode);
+    }
+
+    return Boolean(recipient.email.trim());
+  });
+  const filteredRecipients = templateRecipients.filter((recipient) => {
+    const query = recipientSearch.trim().toLowerCase();
+    if (!query) {
+      return true;
+    }
+
+    return (
+      recipient.name.toLowerCase().includes(query) ||
+      recipient.email.toLowerCase().includes(query) ||
+      recipient.phoneNumber.toLowerCase().includes(query)
+    );
+  });
+  const selectedRecipients = templateRecipients.filter((recipient) =>
+    selectedRecipientIds.includes(recipient.id)
+  );
+  const resendLog = logs.find((log) => log.id === resendLogId) ?? null;
+
+  useEffect(() => {
+    setRecipientSearch("");
+    setSelectedRecipientIds(templateRecipients.slice(0, 10).map((recipient) => recipient.id));
+  }, [selectedTemplateId, recipientMode, recipients]);
+
+  function resetTemplateForm() {
+    setTemplateName("");
+    setTemplateSubject("");
+    setTemplateMessage("");
+    setEditingTemplateId(null);
+  }
+
+  function renderEmailTemplateValue(
+    templateName: string,
+    value: string,
+    recipient: {
+      name: string;
+      phoneNumber: string;
+      email: string;
+      accessLink: string;
+      redeemCode: string | null;
+      redeemLink: string;
+    }
+  ) {
+    const previewMode = templateName.trim().toLowerCase() === "kode" ? "redeem" : "email";
+    const primaryLink = previewMode === "redeem" ? recipient.redeemLink : recipient.accessLink;
+
+    return value
+      .replaceAll("{name}", recipient.name)
+      .replaceAll("{phone}", recipient.phoneNumber)
+      .replaceAll("{email}", recipient.email || "-")
+      .replaceAll("{link}", primaryLink)
+      .replaceAll("{code}", recipient.redeemCode ?? "-")
+      .replaceAll("{redeem_link}", recipient.redeemLink);
+  }
+
+  function toggleRecipient(recipientId: string) {
+    setSelectedRecipientIds((current) => {
+      if (current.includes(recipientId)) {
+        return current.filter((id) => id !== recipientId);
+      }
+
+      if (current.length >= 10) {
+        return current;
+      }
+
+      return [...current, recipientId];
+    });
+  }
+
+  function selectFirstTenRecipients() {
+    setSelectedRecipientIds(filteredRecipients.slice(0, 10).map((recipient) => recipient.id));
+  }
+
+  function clearSelectedRecipients() {
+    setSelectedRecipientIds([]);
+  }
+
+  function openResendModal(logId: string) {
+    setResendLogId(logId);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
+  }
+
+  function closeResendModal() {
+    if (isResendingEmail) {
+      return;
+    }
+
+    setResendLogId(null);
+  }
+
+  function handleEditTemplate(template: {
+    id: string;
+    name: string;
+    subject: string;
+    message: string;
+  }) {
+    setEditingTemplateId(template.id);
+    setTemplateName(template.name);
+    setTemplateSubject(template.subject);
+    setTemplateMessage(template.message);
+    setErrorMessage(null);
+    setFeedback(null);
+  }
+
+  async function handleSaveTemplate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingTemplate(true);
+    setErrorMessage(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/email/templates", {
+        method: editingTemplateId ? "PUT" : "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          templateId: editingTemplateId,
+          name: templateName,
+          subject: templateSubject,
+          message: templateMessage
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to save email template.");
+      }
+
+      setFeedback(
+        editingTemplateId
+          ? `Template updated: ${payload.data.template.name}`
+          : `Template saved: ${payload.data.template.name}`
+      );
+      resetTemplateForm();
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save email template.");
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  }
+
+  async function handleDeleteTemplate(templateId: string) {
+    setDeletingTemplateId(templateId);
+    setErrorMessage(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/email/templates", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          templateId
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to delete email template.");
+      }
+
+      if (selectedTemplateId === templateId) {
+        setSelectedTemplateId("");
+      }
+
+      if (editingTemplateId === templateId) {
+        resetTemplateForm();
+      }
+
+      setFeedback("Template deleted.");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to delete email template.");
+    } finally {
+      setDeletingTemplateId(null);
+    }
+  }
+
+  async function handleSendEmail() {
+    setIsSendingEmail(true);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
+
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          templateId: selectedTemplateId,
+          recipientUserIds: selectedRecipientIds
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to send email.");
+      }
+
+      setSendFeedback(payload.data.detail ?? "Email sent.");
+      setSelectedRecipientIds([]);
+      router.refresh();
+    } catch (error) {
+      setSendErrorMessage(error instanceof Error ? error.message : "Failed to send email.");
+    } finally {
+      setIsSendingEmail(false);
+    }
+  }
+
+  async function handleResendEmail() {
+    if (!resendLog) {
+      return;
+    }
+
+    setIsResendingEmail(true);
+    setSendErrorMessage(null);
+    setSendFeedback(null);
+
+    try {
+      const response = await fetch("/api/email/resend", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          logId: resendLog.id
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Failed to resend email.");
+      }
+
+      setSendFeedback(payload.data.detail ?? "Email resent.");
+      setResendLogId(null);
+      router.refresh();
+    } catch (error) {
+      setSendErrorMessage(error instanceof Error ? error.message : "Failed to resend email.");
+    } finally {
+      setIsResendingEmail(false);
+    }
+  }
+
+  return (
+    <div className="content-grid">
+      <section className="card">
+        <div className="card-header">
+          <div>
+            <h3>Email Template</h3>
+            <p>Create reusable email templates for access links.</p>
+          </div>
+        </div>
+        <form className="form-grid admin-form" onSubmit={handleSaveTemplate}>
+          <div className="field">
+            <label htmlFor="email-template-name">Template name</label>
+            <input
+              id="email-template-name"
+              value={templateName}
+              onChange={(event) => setTemplateName(event.target.value)}
+              placeholder="Akses OTP"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="email-template-subject">Subject</label>
+            <input
+              id="email-template-subject"
+              value={templateSubject}
+              onChange={(event) => setTemplateSubject(event.target.value)}
+              placeholder="Link akses OTP Anda"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="email-template-message">Message</label>
+            <textarea
+              id="email-template-message"
+              className="admin-textarea"
+              value={templateMessage}
+              onChange={(event) => setTemplateMessage(event.target.value)}
+              placeholder="Halo {name}, buka link ini: {link}"
+              required
+            />
+          </div>
+          <div className="import-template-note">
+            Available variables:
+            <code>{`{name}`}</code>
+            <code>{`{phone}`}</code>
+            <code>{`{email}`}</code>
+            <code>{`{link}`}</code>
+            <code>{`{code}`}</code>
+            <code>{`{redeem_link}`}</code>
+          </div>
+          {templates.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table adminlte-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Subject</th>
+                    <th>Updated</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {templates.map((template) => (
+                    <tr key={template.id}>
+                      <td>{template.name}</td>
+                      <td>{template.subject}</td>
+                      <td>{formatDateTime(template.updatedAt)}</td>
+                      <td>
+                        <div className="button-row">
+                          <button
+                            className="button secondary"
+                            onClick={() => handleEditTemplate(template)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="button secondary"
+                            disabled={deletingTemplateId === template.id}
+                            onClick={() => handleDeleteTemplate(template.id)}
+                            type="button"
+                          >
+                            {deletingTemplateId === template.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {errorMessage ? <p className="form-feedback error">{errorMessage}</p> : null}
+          {feedback ? (
+            <div className="form-feedback success-block">
+              <p className="success-title">{feedback}</p>
+            </div>
+          ) : null}
+          <div className="button-row toolbar-row">
+            <button className="button" disabled={isSavingTemplate} type="submit">
+              {isSavingTemplate
+                ? "Saving..."
+                : editingTemplateId
+                  ? "Update Template"
+                  : "Save Template"}
+            </button>
+            {editingTemplateId ? (
+              <button className="button secondary" onClick={resetTemplateForm} type="button">
+                Cancel Edit
+              </button>
+            ) : null}
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <div className="card-header">
+          <div>
+            <h3>Kirim Email</h3>
+            <p>Send one template to up to 10 recipients through Resend.</p>
+          </div>
+        </div>
+        <div className="form-grid admin-form">
+          <div className="field">
+            <label htmlFor="email-template-select">Template</label>
+            <select
+              id="email-template-select"
+              value={selectedTemplateId}
+              onChange={(event) => setSelectedTemplateId(event.target.value)}
+            >
+              <option value="">Select template</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedTemplate ? (
+            <p className="micro">
+              {recipientMode === "redeem"
+                ? "Template KODE akan memakai redeem link sebagai {link}."
+                : "Template email akan memakai access link sebagai {link}."}
+            </p>
+          ) : null}
+          {selectedTemplate ? (
+            <div className="template-preview-block">
+              <div className="template-preview-head">
+                <strong>Template Preview</strong>
+                <span>{selectedTemplate.name}</span>
+              </div>
+              <div className="template-preview-grid">
+                {(selectedRecipients.length > 0 ? selectedRecipients : templateRecipients.slice(0, 1)).map(
+                  (recipient) => (
+                    <article className="template-preview-card" key={recipient.id}>
+                      <p className="micro">
+                        {recipient.name} | {recipient.email}
+                      </p>
+                      <p className="micro">
+                        Subject:{" "}
+                        {renderEmailTemplateValue(selectedTemplate.name, selectedTemplate.subject, recipient)}
+                      </p>
+                      <pre className="template-preview-message">
+                        {renderEmailTemplateValue(selectedTemplate.name, selectedTemplate.message, recipient)}
+                      </pre>
+                    </article>
+                  )
+                )}
+              </div>
+            </div>
+          ) : null}
+          <div className="field search-field">
+            <label htmlFor="email-recipient-search">Search recipient</label>
+            <input
+              id="email-recipient-search"
+              value={recipientSearch}
+              onChange={(event) => setRecipientSearch(event.target.value)}
+              placeholder="Search active users"
+            />
+          </div>
+          <div className="recipient-meta">Selected {selectedRecipientIds.length}/10 recipient(s)</div>
+          <div className="button-row">
+            <button
+              className="button secondary"
+              disabled={filteredRecipients.length === 0}
+              onClick={selectFirstTenRecipients}
+              type="button"
+            >
+              Select 10
+            </button>
+            <button
+              className="button secondary"
+              disabled={selectedRecipientIds.length === 0}
+              onClick={clearSelectedRecipients}
+              type="button"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="recipient-list">
+            {filteredRecipients.map((recipient) => (
+              <label className="recipient-item" key={recipient.id}>
+                <input
+                  type="checkbox"
+                  checked={selectedRecipientIds.includes(recipient.id)}
+                  onChange={() => toggleRecipient(recipient.id)}
+                  disabled={
+                    !selectedRecipientIds.includes(recipient.id) &&
+                    selectedRecipientIds.length >= 10
+                  }
+                />
+                <span>
+                  <strong>{recipient.name}</strong>
+                  <small>{recipient.email}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+          {sendErrorMessage ? <p className="form-feedback error">{sendErrorMessage}</p> : null}
+          {sendFeedback ? (
+            <div className="form-feedback success-block">
+              <p className="success-title">{sendFeedback}</p>
+            </div>
+          ) : null}
+          <div className="button-row toolbar-row">
+            <button
+              className="button"
+              disabled={!selectedTemplateId || selectedRecipientIds.length === 0 || isSendingEmail}
+              onClick={handleSendEmail}
+              type="button"
+            >
+              {isSendingEmail ? "Sending..." : "Send Email"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card card-span-full">
+        <div className="card-header">
+          <div>
+            <h3>Email Log</h3>
+            <p>Delivery history sent through Resend.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table adminlte-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Template</th>
+                <th>Recipients</th>
+                <th>Status</th>
+                <th>Request ID</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.length > 0 ? (
+                logs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{formatDateTime(log.createdAt)}</td>
+                    <td>{log.templateName}</td>
+                    <td>
+                      <div className="log-recipient-list">
+                        {log.recipients.map((recipient) => (
+                          <span key={`${log.id}-${recipient.userId}`}>
+                            {recipient.name} ({recipient.email})
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className={cn(
+                          "badge",
+                          log.status === "failed"
+                            ? "warning"
+                            : log.status === "queued"
+                              ? "neutral"
+                              : "success"
+                        )}
+                      >
+                        {log.status}
+                      </span>
+                    </td>
+                    <td>{log.providerRequestId ?? "-"}</td>
+                    <td>
+                      <button
+                        className="button secondary"
+                        onClick={() => openResendModal(log.id)}
+                        type="button"
+                      >
+                        Resend
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6}>No email logs yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {resendLog ? (
+        <div className="modal-backdrop" onClick={closeResendModal} role="presentation">
+          <div
+            className="modal-card"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-head">
+              <div>
+                <h3>Preview Resend</h3>
+                <p>{resendLog.templateName} | {resendLog.recipients.length} recipient(s)</p>
+              </div>
+              <button className="modal-close" onClick={closeResendModal} type="button">
+                Close
+              </button>
+            </div>
+            <div className="form-grid modal-form">
+              <div className="template-preview-block">
+                <div className="template-preview-head">
+                  <strong>Template Preview</strong>
+                  <span>{resendLog.templateName}</span>
+                </div>
+                <div className="template-preview-grid">
+                  {resendLog.recipients.map((recipient) => (
+                    <article className="template-preview-card" key={`${resendLog.id}-${recipient.userId}`}>
+                      <p className="micro">
+                        {recipient.name} | {recipient.email}
+                      </p>
+                      <p className="micro">
+                        Subject: {renderEmailTemplateValue(resendLog.templateName, resendLog.subject, {
+                          name: recipient.name,
+                          phoneNumber: recipient.phoneNumber ?? "-",
+                          email: recipient.email,
+                          accessLink: recipient.accessLink ?? recipient.redeemLink ?? "-",
+                          redeemCode: recipient.redeemCode ?? null,
+                          redeemLink: recipient.redeemLink ?? recipient.accessLink ?? "-"
+                        })}
+                      </p>
+                      <pre className="template-preview-message">
+                        {renderEmailTemplateValue(resendLog.templateName, resendLog.message, {
+                          name: recipient.name,
+                          phoneNumber: recipient.phoneNumber ?? "-",
+                          email: recipient.email,
+                          accessLink: recipient.accessLink ?? recipient.redeemLink ?? "-",
+                          redeemCode: recipient.redeemCode ?? null,
+                          redeemLink: recipient.redeemLink ?? recipient.accessLink ?? "-"
+                        })}
+                      </pre>
+                    </article>
+                  ))}
+                </div>
+              </div>
+              {sendErrorMessage ? <p className="form-feedback error">{sendErrorMessage}</p> : null}
+              <div className="button-row">
+                <button
+                  className="button"
+                  disabled={isResendingEmail}
+                  onClick={handleResendEmail}
+                  type="button"
+                >
+                  {isResendingEmail ? "Resending..." : "Confirm Resend"}
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={isResendingEmail}
+                  onClick={closeResendModal}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2141,6 +2889,9 @@ export function AdminDashboard({
   otpMessages,
   redeemCodes,
   redeemUsers,
+  emailTemplates,
+  emailLogs,
+  emailRecipients,
   whatsappTemplates,
   whatsappLogs,
   whatsappRecipients
@@ -2266,6 +3017,14 @@ export function AdminDashboard({
 
         {activeTab === "redeem" ? (
           <RedeemSection redeemCodes={redeemCodes ?? []} users={redeemUsers ?? []} fullWidth />
+        ) : null}
+
+        {activeTab === "email" ? (
+          <EmailSection
+            templates={emailTemplates}
+            logs={emailLogs}
+            recipients={emailRecipients}
+          />
         ) : null}
 
         {activeTab === "whatsapp" ? (

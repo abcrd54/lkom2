@@ -6,6 +6,7 @@ import { z } from "zod";
 
 const baseUserSchema = z.object({
   name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(320),
   phoneNumber: z.string().trim().min(8).max(30),
   subMailAccountId: z.string().uuid().nullable().optional()
 });
@@ -29,6 +30,7 @@ export const deleteUserSchema = z.object({
 type UserRow = {
   id: string;
   name: string;
+  email: string | null;
   phone_number: string;
   mail_account_id: string | null;
   sub_mail_account_id: string | null;
@@ -82,6 +84,7 @@ function extractSubMailAccountRelation(relation: UserRow["sub_mail_accounts"]) {
 export type UserView = {
   id: string;
   name: string;
+  email: string;
   phoneNumber: string;
   status: UserStatus;
   mailAccountId: string | null;
@@ -113,6 +116,7 @@ function mapUserRow(row: UserRow): UserView {
   return {
     id: row.id,
     name: row.name,
+    email: row.email ?? "",
     phoneNumber: row.phone_number,
     status: row.status,
     mailAccountId: row.mail_account_id,
@@ -147,6 +151,14 @@ export function normalizeUserPhoneNumber(phoneNumber: string) {
   return normalizePhoneNumber(phoneNumber);
 }
 
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+export function normalizeUserEmail(email: string) {
+  return normalizeEmail(email);
+}
+
 async function assertUniquePhoneNumber(phoneNumber: string, userId?: string) {
   const supabase = createSupabaseAdminClient();
   let query = supabase
@@ -169,6 +181,28 @@ async function assertUniquePhoneNumber(phoneNumber: string, userId?: string) {
     const existingName =
       existingUser && typeof existingUser.name === "string" ? existingUser.name : "another user";
     throw new Error(`Phone number is already used by ${existingName}.`);
+  }
+}
+
+async function assertUniqueEmail(email: string, userId?: string) {
+  const supabase = createSupabaseAdminClient();
+  let query = supabase.from("users").select("id, name", { count: "exact" }).eq("email", email);
+
+  if (userId) {
+    query = query.neq("id", userId);
+  }
+
+  const { data, error, count } = await query.limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  if ((count ?? 0) > 0) {
+    const existingUser = Array.isArray(data) ? data[0] : null;
+    const existingName =
+      existingUser && typeof existingUser.name === "string" ? existingUser.name : "another user";
+    throw new Error(`Email is already used by ${existingName}.`);
   }
 }
 
@@ -213,7 +247,7 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
     supabase
       .from("users")
       .select(
-        "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+        "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
       )
       .order("created_at", { ascending: false })
       .range(from, to),
@@ -241,7 +275,9 @@ export async function listUsersPage(input?: { page?: number; pageSize?: number }
 
 export async function createUser(input: z.infer<typeof createUserSchema>) {
   const assignment = await resolveUserAssignment(input.subMailAccountId);
+  const normalizedEmail = normalizeEmail(input.email);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await assertUniqueEmail(normalizedEmail);
   await assertUniquePhoneNumber(normalizedPhoneNumber);
 
   const supabase = createSupabaseAdminClient();
@@ -253,6 +289,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
     .from("users")
     .insert({
       name: input.name,
+      email: normalizedEmail,
       phone_number: normalizedPhoneNumber,
       mail_account_id: assignment.mailAccountId,
       sub_mail_account_id: assignment.subMailAccountId,
@@ -262,7 +299,7 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
       link_disabled_at: null
     })
     .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+      "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -275,12 +312,15 @@ export async function createUser(input: z.infer<typeof createUserSchema>) {
 
 export async function updateUser(input: z.infer<typeof updateUserSchema>) {
   const assignment = await resolveUserAssignment(input.subMailAccountId);
+  const normalizedEmail = normalizeEmail(input.email);
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await assertUniqueEmail(normalizedEmail, input.userId);
   await assertUniquePhoneNumber(normalizedPhoneNumber, input.userId);
 
   const supabase = createSupabaseAdminClient();
   const payload: {
     name: string;
+    email: string;
     phone_number: string;
     mail_account_id: string | null;
     sub_mail_account_id: string | null;
@@ -288,6 +328,7 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
     link_disabled_at?: string | null;
   } = {
     name: input.name,
+    email: normalizedEmail,
     phone_number: normalizedPhoneNumber,
     mail_account_id: assignment.mailAccountId,
     sub_mail_account_id: assignment.subMailAccountId
@@ -303,7 +344,7 @@ export async function updateUser(input: z.infer<typeof updateUserSchema>) {
     .update(payload)
     .eq("id", input.userId)
     .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+      "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -326,7 +367,7 @@ export async function setUserDisabled(input: z.infer<typeof disableUserSchema>) 
     })
     .eq("id", input.userId)
     .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+      "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .single();
 
@@ -353,7 +394,7 @@ export async function getUserByAccessToken(token: string) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+      "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .eq("access_token_hash", hashAccessToken(token))
     .maybeSingle();
@@ -375,7 +416,7 @@ export async function findUserByPhoneNumber(phoneNumber: string) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, name, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
+      "id, name, email, phone_number, mail_account_id, sub_mail_account_id, access_token_encrypted, status, link_disabled_at, created_at, updated_at, mail_accounts(provider, email_address, status), sub_mail_accounts(label, display_email, max_users)"
     )
     .eq("phone_number", normalizedPhoneNumber)
     .maybeSingle();

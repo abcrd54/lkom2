@@ -75,25 +75,10 @@ type WhatsappLogRow = {
 type RecipientRow = {
   id: string;
   name: string;
+  email: string | null;
   phone_number: string;
   status: "active" | "disabled";
   access_token_encrypted: string;
-  mail_accounts?:
-    | {
-        email_address: string;
-      }
-    | Array<{
-        email_address: string;
-      }>
-    | null;
-  sub_mail_accounts?:
-    | {
-        display_email: string;
-      }
-    | Array<{
-        display_email: string;
-      }>
-    | null;
   redeem_code_users?:
     | Array<{
         assigned_at: string;
@@ -151,19 +136,6 @@ type PartialLoggedRecipient = {
   redeemCode?: string | null;
   redeemLink?: string;
 };
-
-function getInboxEmail(relation: RecipientRow["mail_accounts"]): string {
-  const mailAccount = Array.isArray(relation) ? (relation[0] ?? null) : relation ?? null;
-  return mailAccount?.email_address ?? "";
-}
-
-function getDisplayEmail(row: RecipientRow): string {
-  const subMailAccount = Array.isArray(row.sub_mail_accounts)
-    ? (row.sub_mail_accounts[0] ?? null)
-    : row.sub_mail_accounts ?? null;
-
-  return subMailAccount?.display_email ?? getInboxEmail(row.mail_accounts);
-}
 
 function getLatestRedeemCode(
   assignments: RecipientRow["redeem_code_users"]
@@ -380,7 +352,7 @@ async function queryRecipients(options?: {
   let query = supabase
     .from("users")
     .select(
-      "id, name, phone_number, status, access_token_encrypted, mail_accounts(email_address), sub_mail_accounts(display_email), redeem_code_users(assigned_at, redeem_codes(code))"
+      "id, name, email, phone_number, status, access_token_encrypted, redeem_code_users(assigned_at, redeem_codes(code))"
     )
     .eq("status", "active");
 
@@ -413,7 +385,7 @@ async function queryRecipients(options?: {
       id: row.id,
       name: row.name,
       phoneNumber: normalizeWhatsappPhoneNumber(row.phone_number),
-      email: getDisplayEmail(row),
+      email: row.email?.trim().toLowerCase() ?? "",
       accessLink: buildAbsoluteAccessLink(origin, decryptAccessToken(row.access_token_encrypted)),
       redeemCode: getLatestRedeemCode(row.redeem_code_users),
       redeemLink: buildAbsoluteRedeemLink(origin, decryptAccessToken(row.access_token_encrypted))

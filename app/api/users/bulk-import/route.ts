@@ -6,13 +6,14 @@ import {
   normalizeImportedRedeemCode
 } from "@/lib/redeem-codes";
 import { resolveActiveInboxSlotByEmail } from "@/lib/sub-mail-accounts";
-import { createUser, deleteUser, normalizeUserPhoneNumber } from "@/lib/users";
+import { createUser, deleteUser, normalizeUserEmail, normalizeUserPhoneNumber } from "@/lib/users";
 import { z } from "zod";
 
 const bulkImportRowSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  userEmail: z.string().trim().email(),
   phoneNumber: z.string().trim().min(8).max(30),
-  emailConnect: z.string().trim().optional().default(""),
+  otpInbox: z.string().trim().optional().default(""),
   codeRedeem: z.string().trim().optional().default("")
 });
 
@@ -23,8 +24,9 @@ const bulkImportUsersSchema = z.object({
 type ImportFailure = {
   row: number;
   name: string;
+  userEmail: string;
   phoneNumber: string;
-  emailConnect: string;
+  otpInbox: string;
   codeRedeem: string;
   reason: string;
 };
@@ -40,20 +42,24 @@ function hasScientificNotation(value: string) {
 
 function formatImportFailureReason(
   error: unknown,
-  context: Pick<ImportFailure, "emailConnect" | "codeRedeem">
+  context: Pick<ImportFailure, "otpInbox" | "codeRedeem">
 ) {
   const message = getErrorMessage(error);
 
   if (message.startsWith("Inbox slot not found or disabled:")) {
-    return `Inbox "${context.emailConnect}" was not found or is disabled.`;
+    return `Inbox "${context.otpInbox}" was not found or is disabled.`;
   }
 
   const subAccountLimitMatch = message.match(/sub mail account already has maximum (\d+) active users/i);
   if (subAccountLimitMatch) {
-    return `Inbox "${context.emailConnect}" is full (${subAccountLimitMatch[1]} active users max).`;
+    return `Inbox "${context.otpInbox}" is full (${subAccountLimitMatch[1]} active users max).`;
   }
 
   if (message.startsWith("Phone number is already used by ")) {
+    return message;
+  }
+
+  if (message.startsWith("Email is already used by ")) {
     return message;
   }
 
@@ -94,10 +100,12 @@ export async function POST(request: Request) {
     const subAccountCache = new Map<string, Awaited<ReturnType<typeof resolveActiveInboxSlotByEmail>>>();
     const redeemCodeCache = new Map<string, Awaited<ReturnType<typeof getRedeemCodeByCode>>>();
     const firstRowByPhone = new Map<string, number>();
+    const firstRowByEmail = new Map<string, number>();
 
     for (const [index, row] of payload.rows.entries()) {
       const rowNumber = index + 2;
-      const emailConnect = row.emailConnect.trim().toLowerCase();
+      const normalizedEmail = normalizeUserEmail(row.userEmail);
+      const otpInbox = row.otpInbox.trim().toLowerCase();
       const codeRedeem = normalizeImportedRedeemCode(row.codeRedeem);
       const rawPhoneNumber = row.phoneNumber.trim();
       const normalizedPhoneNumber = normalizeUserPhoneNumber(row.phoneNumber);
@@ -106,8 +114,9 @@ export async function POST(request: Request) {
         failed.push({
           row: rowNumber,
           name: row.name,
+          userEmail: row.userEmail,
           phoneNumber: row.phoneNumber,
-          emailConnect,
+          otpInbox,
           codeRedeem,
           reason:
             "Phone number is stored in scientific notation. Re-export the file with the phoneNumber column formatted as Text."
@@ -120,8 +129,9 @@ export async function POST(request: Request) {
         failed.push({
           row: rowNumber,
           name: row.name,
+          userEmail: row.userEmail,
           phoneNumber: row.phoneNumber,
-          emailConnect,
+          otpInbox,
           codeRedeem,
           reason: `Phone number is duplicated in this import file (first used on row ${firstSeenRow}).`
         });
@@ -130,14 +140,31 @@ export async function POST(request: Request) {
 
       firstRowByPhone.set(normalizedPhoneNumber, rowNumber);
 
-      if (!emailConnect && !codeRedeem) {
+      const firstSeenEmailRow = firstRowByEmail.get(normalizedEmail);
+      if (firstSeenEmailRow) {
         failed.push({
           row: rowNumber,
           name: row.name,
+          userEmail: row.userEmail,
           phoneNumber: row.phoneNumber,
-          emailConnect,
+          otpInbox,
           codeRedeem,
-          reason: "Row must include email_connect or code_redeem."
+          reason: `Email is duplicated in this import file (first used on row ${firstSeenEmailRow}).`
+        });
+        continue;
+      }
+
+      firstRowByEmail.set(normalizedEmail, rowNumber);
+
+      if (!otpInbox && !codeRedeem) {
+        failed.push({
+          row: rowNumber,
+          name: row.name,
+          userEmail: row.userEmail,
+          phoneNumber: row.phoneNumber,
+          otpInbox,
+          codeRedeem,
+          reason: "Row must include otp_inbox or code_redeem."
         });
         continue;
       }
@@ -146,20 +173,21 @@ export async function POST(request: Request) {
       let createdNewUser = false;
 
       try {
-        if (emailConnect) {
-          let subMailAccount = subAccountCache.get(emailConnect);
+        if (otpInbox) {
+          let subMailAccount = subAccountCache.get(otpInbox);
 
           if (subMailAccount === undefined) {
-            subMailAccount = await resolveActiveInboxSlotByEmail(emailConnect);
-            subAccountCache.set(emailConnect, subMailAccount);
+            subMailAccount = await resolveActiveInboxSlotByEmail(otpInbox);
+            subAccountCache.set(otpInbox, subMailAccount);
           }
 
           if (!subMailAccount) {
-            throw new Error(`Inbox slot not found or disabled: ${emailConnect}`);
+            throw new Error(`Inbox slot not found or disabled: ${otpInbox}`);
           }
 
           const user = await createUser({
             name: row.name,
+            email: row.userEmail,
             phoneNumber: row.phoneNumber,
             subMailAccountId: subMailAccount.id
           });
@@ -169,6 +197,7 @@ export async function POST(request: Request) {
         } else {
           const user = await createUser({
             name: row.name,
+            email: row.userEmail,
             phoneNumber: row.phoneNumber,
             subMailAccountId: null
           });
@@ -195,15 +224,16 @@ export async function POST(request: Request) {
               userId: targetUserId
             });
           } catch (error) {
-            if (!emailConnect && createdNewUser && targetUserId) {
+            if (!otpInbox && createdNewUser && targetUserId) {
               await deleteUser({ userId: targetUserId });
               failed.push({
                 row: rowNumber,
                 name: row.name,
+                userEmail: row.userEmail,
                 phoneNumber: row.phoneNumber,
-                emailConnect,
+                otpInbox,
                 codeRedeem,
-                reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
+                reason: formatImportFailureReason(error, { otpInbox, codeRedeem })
               });
               continue;
             }
@@ -212,10 +242,11 @@ export async function POST(request: Request) {
             targetList.push({
               row: rowNumber,
               name: row.name,
+              userEmail: row.userEmail,
               phoneNumber: row.phoneNumber,
-              emailConnect,
+              otpInbox,
               codeRedeem,
-              reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
+              reason: formatImportFailureReason(error, { otpInbox, codeRedeem })
             });
             continue;
           }
@@ -226,10 +257,11 @@ export async function POST(request: Request) {
         failed.push({
           row: rowNumber,
           name: row.name,
+          userEmail: row.userEmail,
           phoneNumber: row.phoneNumber,
-          emailConnect,
+          otpInbox,
           codeRedeem,
-          reason: formatImportFailureReason(error, { emailConnect, codeRedeem })
+          reason: formatImportFailureReason(error, { otpInbox, codeRedeem })
         });
       }
     }
