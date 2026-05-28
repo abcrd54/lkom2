@@ -67,6 +67,7 @@ type UserAccessApiPayload =
     };
 
 export function UserAccessPage({ accessToken, user, messages }: UserAccessPageProps) {
+  const sessionStorageKey = `otp-session-started-at:${accessToken}`;
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -74,6 +75,8 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
   const [liveMessages, setLiveMessages] = useState(messages);
   const [newMessageIds, setNewMessageIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
+  const [skipUnloadWarningUntil, setSkipUnloadWarningUntil] = useState(0);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 10_000);
@@ -86,11 +89,48 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
   }, [messages]);
 
   useEffect(() => {
+    const existingStartedAt = window.localStorage.getItem(sessionStorageKey);
+    const nextStartedAt = existingStartedAt ?? new Date().toISOString();
+
+    if (!existingStartedAt) {
+      window.localStorage.setItem(sessionStorageKey, nextStartedAt);
+    }
+
+    setSessionStartedAt(nextStartedAt);
+  }, [sessionStorageKey]);
+
+  useEffect(() => {
     if (!user || user.status !== "active" || !user.hasInbox || user.inboxStatus === "disabled") {
       return;
     }
 
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (Date.now() < skipUnloadWarningUntil) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue =
+        "Refresh manual atau menutup halaman bisa membuat Anda kehilangan konteks sesi OTP. Lanjutkan?";
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [skipUnloadWarningUntil, user]);
+
+  useEffect(() => {
+    if (
+      !user ||
+      user.status !== "active" ||
+      !user.hasInbox ||
+      user.inboxStatus === "disabled" ||
+      !sessionStartedAt
+    ) {
+      return;
+    }
+
     let cancelled = false;
+    const startedAt = sessionStartedAt;
 
     async function refreshOtpMessages(showRefreshState = false) {
       if (showRefreshState) {
@@ -98,9 +138,12 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
       }
 
       try {
-        const response = await fetch(`/api/access/${accessToken}/otp`, {
-          cache: "no-store"
-        });
+        const response = await fetch(
+          `/api/access/${accessToken}/otp?startedAt=${encodeURIComponent(startedAt)}`,
+          {
+            cache: "no-store"
+          }
+        );
         const payload = (await response.json()) as UserAccessApiPayload;
 
         if (!response.ok || !payload.ok) {
@@ -143,7 +186,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [accessToken, user]);
+  }, [accessToken, sessionStartedAt, user]);
 
   function showToast(message: string) {
     setToastMessage(message);
@@ -208,12 +251,20 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
   }
 
   async function handleRefresh() {
+    setSkipUnloadWarningUntil(Date.now() + 3000);
     setIsRefreshing(true);
 
     try {
-      const response = await fetch(`/api/access/${accessToken}/otp`, {
-        cache: "no-store"
-      });
+      if (!sessionStartedAt) {
+        throw new Error("Session not initialized.");
+      }
+
+      const response = await fetch(
+        `/api/access/${accessToken}/otp?startedAt=${encodeURIComponent(sessionStartedAt)}`,
+        {
+          cache: "no-store"
+        }
+      );
       const payload = (await response.json()) as UserAccessApiPayload;
 
       if (!response.ok || !payload.ok) {
@@ -248,6 +299,24 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
     }
   }
 
+  function formatSessionStartedAt(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return `${new Intl.DateTimeFormat("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Jakarta"
+    }).format(date)} WIB`;
+  }
+
   if (!user || user.status !== "active") {
     return (
       <section className="user-access-shell">
@@ -274,6 +343,12 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
                 OTP feed for <strong>{user.inboxAddress}</strong> via{" "}
                 <strong>{user.provider ? providerLabel(user.provider) : "-"}</strong>.
               </p>
+              {sessionStartedAt ? (
+                <p className="user-access-copy">
+                  Menampilkan OTP OpenAI/ChatGPT sejak{" "}
+                  <strong>{formatSessionStartedAt(sessionStartedAt)}</strong>.
+                </p>
+              ) : null}
               <p className="user-access-status">{formatUpdatedAgo()}</p>
             </>
           ) : (
@@ -349,7 +424,7 @@ export function UserAccessPage({ accessToken, user, messages }: UserAccessPagePr
               <h3>{user.hasInbox ? "No OTP yet" : "No inbox connected"}</h3>
               <p className="user-access-copy">
                 {user.hasInbox
-                  ? "New messages will appear here after inbox sync runs."
+                  ? "OTP OpenAI/ChatGPT yang masuk setelah sesi ini dimulai akan muncul di sini."
                   : "This user was created for redeem access only."}
               </p>
             </article>

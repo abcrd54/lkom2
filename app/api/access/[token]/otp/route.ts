@@ -12,6 +12,8 @@ export async function GET(_: Request, { params }: RouteProps) {
   try {
     const { token } = await params;
     const user = await getUserByAccessToken(token);
+    const requestUrl = new URL(_.url);
+    const startedAt = requestUrl.searchParams.get("startedAt");
 
     if (!user || user.status !== "active") {
       return jsonError("Access link is invalid or disabled.", 404);
@@ -30,7 +32,10 @@ export async function GET(_: Request, { params }: RouteProps) {
       });
     }
 
-    const items = await listOtpMessagesForMailAccount(user.mailAccountId);
+    const items = await listOtpMessagesForMailAccount(user.mailAccountId, 50, {
+      receivedAfter: startedAt ?? undefined,
+      openAiOnly: true
+    });
 
     return jsonOk({
       user: {
@@ -40,6 +45,7 @@ export async function GET(_: Request, { params }: RouteProps) {
         hasInbox: true,
         inboxAddress: user.inboxAddress
       },
+      sessionStartedAt: startedAt,
       items
     });
   } catch (error) {

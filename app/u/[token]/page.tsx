@@ -1,6 +1,5 @@
 import { PageShell } from "@/components/page-shell";
 import { UserAccessPage } from "@/components/user-access-page";
-import { listOtpMessagesForMailAccount } from "@/lib/otp-messages";
 import { getUserByAccessToken } from "@/lib/users";
 
 type UserAccessRouteProps = {
@@ -12,10 +11,6 @@ type UserAccessRouteProps = {
 export default async function UserAccessRoute({ params }: UserAccessRouteProps) {
   const { token } = await params;
   const user = await getUserByAccessToken(token);
-  const messages =
-    user && user.status === "active" && user.mailAccountId && user.inboxStatus !== "disabled"
-      ? await listOtpMessagesForMailAccount(user.mailAccountId)
-      : [];
 
   return (
     <PageShell>
@@ -34,7 +29,7 @@ export default async function UserAccessRoute({ params }: UserAccessRouteProps) 
               }
             : null
         }
-        messages={messages}
+        messages={[]}
       />
     </PageShell>
   );

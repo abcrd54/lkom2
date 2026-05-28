@@ -10,6 +10,9 @@ export const adminOtpFilterSchema = z.object({
   page: z.coerce.number().int().min(1).default(1)
 });
 
+const OPENAI_OTP_FILTER =
+  "sender.ilike.%openai%,sender.ilike.%chatgpt%,subject.ilike.%openai%,subject.ilike.%chatgpt%,body_preview.ilike.%openai%,body_preview.ilike.%chatgpt%";
+
 export type PaginatedOtpMessagesResult = {
   items: Array<{
     id: string;
@@ -145,9 +148,16 @@ export async function listAdminOtpMessages(rawFilters: unknown) {
   } satisfies PaginatedOtpMessagesResult;
 }
 
-export async function listOtpMessagesForMailAccount(mailAccountId: string, limit = 50) {
+export async function listOtpMessagesForMailAccount(
+  mailAccountId: string,
+  limit = 50,
+  options?: {
+    receivedAfter?: string;
+    openAiOnly?: boolean;
+  }
+) {
   const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("otp_messages")
     .select(
       "id, mail_account_id, provider_message_id, sender, recipient, subject, otp_code, body_preview, received_at, created_at, mail_accounts(provider, email_address, status)"
@@ -155,6 +165,16 @@ export async function listOtpMessagesForMailAccount(mailAccountId: string, limit
     .eq("mail_account_id", mailAccountId)
     .order("received_at", { ascending: false })
     .limit(limit);
+
+  if (options?.receivedAfter) {
+    query = query.gte("received_at", options.receivedAfter);
+  }
+
+  if (options?.openAiOnly) {
+    query = query.or(OPENAI_OTP_FILTER);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
