@@ -129,12 +129,16 @@ export async function listMailAccounts() {
 export async function getMailAccountSummary() {
   const supabase = createSupabaseAdminClient();
   const [
-    { count: inboxCount, error: inboxError },
+    { count: primaryAccountCount, error: primaryAccountError },
+    { count: subAccountCount, error: subAccountError },
+    { count: redeemCodeCount, error: redeemCodeError },
     { count: activeUserCount, error: userError },
     { count: otpCount, error: otpError },
     { count: problematicCount, error: problemError }
   ] = await Promise.all([
     supabase.from("mail_accounts").select("*", { count: "exact", head: true }),
+    supabase.from("sub_mail_accounts").select("*", { count: "exact", head: true }),
+    supabase.from("redeem_codes").select("*", { count: "exact", head: true }),
     supabase.from("users").select("*", { count: "exact", head: true }).eq("status", "active"),
     supabase.from("otp_messages").select("*", { count: "exact", head: true }),
     supabase
@@ -143,8 +147,16 @@ export async function getMailAccountSummary() {
       .neq("status", "active")
   ]);
 
-  if (inboxError) {
-    throw inboxError;
+  if (primaryAccountError) {
+    throw primaryAccountError;
+  }
+
+  if (subAccountError) {
+    throw subAccountError;
+  }
+
+  if (redeemCodeError) {
+    throw redeemCodeError;
   }
 
   if (userError) {
@@ -160,7 +172,7 @@ export async function getMailAccountSummary() {
   }
 
   return {
-    inboxCount: inboxCount ?? 0,
+    inboxCount: (primaryAccountCount ?? 0) + (subAccountCount ?? 0) + (redeemCodeCount ?? 0),
     activeUserCount: activeUserCount ?? 0,
     otpCount: otpCount ?? 0,
     problematicCount: problematicCount ?? 0

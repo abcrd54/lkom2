@@ -320,7 +320,7 @@ function OverviewSection(props: Pick<AdminDashboardProps, "stats" | "mailAccount
       <section className="small-box-grid">
         <article className="small-box blue">
           <div>
-            <p>Inbox Connected</p>
+            <p>Email Connected</p>
             <strong>{props.stats.inboxCount}</strong>
           </div>
           <span className="small-box-icon">IN</span>
@@ -2984,7 +2984,7 @@ export function AdminDashboard({
           </div>
           <div className="topbar-right">
             <span className="topbar-chip">Super Admin</span>
-            <span className="topbar-chip muted">{stats.inboxCount} inbox</span>
+            <span className="topbar-chip muted">{stats.inboxCount} email</span>
           </div>
         </header>
 
