@@ -1542,6 +1542,14 @@ function EmailSection({
   const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
   const [resendLogId, setResendLogId] = useState<string | null>(null);
   const [isResendingEmail, setIsResendingEmail] = useState(false);
+  const [sendProgress, setSendProgress] = useState<{
+    requestId: string;
+    processedCount: number;
+    sentCount: number;
+    failedCount: number;
+    totalCount: number;
+    status: "queued" | "sent" | "failed" | "partial";
+  } | null>(null);
   const selectedTemplate =
     templates.find((template) => template.id === selectedTemplateId) ?? null;
   const recipientMode =
@@ -1576,8 +1584,66 @@ function EmailSection({
 
   useEffect(() => {
     setRecipientSearch("");
-    setSelectedRecipientIds(templateRecipients.slice(0, 10).map((recipient) => recipient.id));
+    setSelectedRecipientIds(templateRecipients.map((recipient) => recipient.id));
   }, [selectedTemplateId, recipientMode, recipients]);
+
+  useEffect(() => {
+    if (!sendProgress || sendProgress.status !== "queued") {
+      return;
+    }
+
+    const requestId = sendProgress.requestId;
+    let isCancelled = false;
+
+    async function pollProgress() {
+      try {
+        const response = await fetch(`/api/email/progress?requestId=${encodeURIComponent(requestId)}`, {
+          cache: "no-store"
+        });
+        const payload = await response.json();
+
+        if (!response.ok || !payload?.ok || !payload?.data?.progress || isCancelled) {
+          return;
+        }
+
+        const progress = payload.data.progress as {
+          requestId?: string;
+          processedCount: number;
+          sentCount: number;
+          failedCount: number;
+          totalCount: number;
+          status: "queued" | "sent" | "failed" | "partial";
+        };
+
+        setSendProgress((current) => {
+          if (!current || current.requestId !== requestId) {
+            return current;
+          }
+
+          return {
+            requestId: current.requestId,
+            processedCount: progress.processedCount,
+            sentCount: progress.sentCount,
+            failedCount: progress.failedCount,
+            totalCount: progress.totalCount,
+            status: progress.status
+          };
+        });
+      } catch {
+        return;
+      }
+    }
+
+    void pollProgress();
+    const intervalId = window.setInterval(() => {
+      void pollProgress();
+    }, 1000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [sendProgress?.requestId, sendProgress?.status]);
 
   function resetTemplateForm() {
     setTemplateName("");
@@ -1616,16 +1682,12 @@ function EmailSection({
         return current.filter((id) => id !== recipientId);
       }
 
-      if (current.length >= 10) {
-        return current;
-      }
-
       return [...current, recipientId];
     });
   }
 
-  function selectFirstTenRecipients() {
-    setSelectedRecipientIds(filteredRecipients.slice(0, 10).map((recipient) => recipient.id));
+  function selectAllRecipients() {
+    setSelectedRecipientIds(filteredRecipients.map((recipient) => recipient.id));
   }
 
   function clearSelectedRecipients() {
@@ -1741,6 +1803,15 @@ function EmailSection({
     setIsSendingEmail(true);
     setSendErrorMessage(null);
     setSendFeedback(null);
+    const requestId = crypto.randomUUID();
+    setSendProgress({
+      requestId,
+      processedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      totalCount: selectedRecipientIds.length,
+      status: "queued"
+    });
 
     try {
       const response = await fetch("/api/email/send", {
@@ -1750,7 +1821,8 @@ function EmailSection({
         },
         body: JSON.stringify({
           templateId: selectedTemplateId,
-          recipientUserIds: selectedRecipientIds
+          recipientUserIds: selectedRecipientIds,
+          clientRequestId: requestId
         })
       });
 
@@ -1759,10 +1831,68 @@ function EmailSection({
         throw new Error(payload?.error ?? "Failed to send email.");
       }
 
+      try {
+        const progressResponse = await fetch(
+          `/api/email/progress?requestId=${encodeURIComponent(requestId)}`,
+          {
+            cache: "no-store"
+          }
+        );
+        const progressPayload = await progressResponse.json();
+
+        if (progressResponse.ok && progressPayload?.ok && progressPayload?.data?.progress) {
+          const progress = progressPayload.data.progress as {
+            processedCount: number;
+            sentCount: number;
+            failedCount: number;
+            totalCount: number;
+            status: "queued" | "sent" | "failed" | "partial";
+          };
+          setSendProgress({
+            requestId,
+            processedCount: progress.processedCount,
+            sentCount: progress.sentCount,
+            failedCount: progress.failedCount,
+            totalCount: progress.totalCount,
+            status: progress.status
+          });
+        }
+      } catch {
+        // Keep the live counter if the final refresh cannot be fetched.
+      }
       setSendFeedback(payload.data.detail ?? "Email sent.");
       setSelectedRecipientIds([]);
       router.refresh();
     } catch (error) {
+      try {
+        const progressResponse = await fetch(
+          `/api/email/progress?requestId=${encodeURIComponent(requestId)}`,
+          {
+            cache: "no-store"
+          }
+        );
+        const progressPayload = await progressResponse.json();
+
+        if (progressResponse.ok && progressPayload?.ok && progressPayload?.data?.progress) {
+          const progress = progressPayload.data.progress as {
+            processedCount: number;
+            sentCount: number;
+            failedCount: number;
+            totalCount: number;
+            status: "queued" | "sent" | "failed" | "partial";
+          };
+          setSendProgress({
+            requestId,
+            processedCount: progress.processedCount,
+            sentCount: progress.sentCount,
+            failedCount: progress.failedCount,
+            totalCount: progress.totalCount,
+            status: progress.status
+          });
+        }
+      } catch {
+        // Keep the last visible progress state if follow-up polling fails.
+      }
       setSendErrorMessage(error instanceof Error ? error.message : "Failed to send email.");
     } finally {
       setIsSendingEmail(false);
@@ -1923,7 +2053,7 @@ function EmailSection({
         <div className="card-header">
           <div>
             <h3>Kirim Email</h3>
-            <p>Send one template to up to 10 recipients through Resend.</p>
+            <p>Send one template to the selected recipients through Resend.</p>
           </div>
         </div>
         <div className="form-grid admin-form">
@@ -1984,7 +2114,7 @@ function EmailSection({
               placeholder="Search active users"
             />
           </div>
-          <div className="recipient-meta">Selected {selectedRecipientIds.length}/10 recipient(s)</div>
+          <div className="recipient-meta">Selected {selectedRecipientIds.length} recipient(s)</div>
           {selectedRecipientIds.length > 0 ? (
             <p className="micro">
               Sending uses a queue of 2 email(s) every 3 seconds. Estimated duration: about{" "}
@@ -1998,10 +2128,10 @@ function EmailSection({
             <button
               className="button secondary"
               disabled={filteredRecipients.length === 0}
-              onClick={selectFirstTenRecipients}
+              onClick={selectAllRecipients}
               type="button"
             >
-              Select 10
+              Select All
             </button>
             <button
               className="button secondary"
@@ -2019,10 +2149,6 @@ function EmailSection({
                   type="checkbox"
                   checked={selectedRecipientIds.includes(recipient.id)}
                   onChange={() => toggleRecipient(recipient.id)}
-                  disabled={
-                    !selectedRecipientIds.includes(recipient.id) &&
-                    selectedRecipientIds.length >= 10
-                  }
                 />
                 <span>
                   <strong>{recipient.name}</strong>
@@ -2038,9 +2164,20 @@ function EmailSection({
             </div>
           ) : null}
           {isSendingEmail ? (
-            <p className="micro">
-              Sending in queue. Keep this page open while the selected recipients are processed.
-            </p>
+            <div className="template-preview-block">
+              <p className="micro">
+                Sending in queue. Keep this page open while the selected recipients are processed.
+              </p>
+              {sendProgress ? (
+                <p className="micro">
+                  Progress:{" "}
+                  <strong>
+                    {sendProgress.processedCount}/{sendProgress.totalCount}
+                  </strong>{" "}
+                  processed | sent {sendProgress.sentCount} | failed {sendProgress.failedCount}
+                </p>
+              ) : null}
+            </div>
           ) : null}
           <div className="button-row toolbar-row">
             <button

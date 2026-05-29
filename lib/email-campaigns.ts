@@ -23,7 +23,8 @@ export const deleteEmailTemplateSchema = z.object({
 
 export const sendEmailCampaignSchema = z.object({
   templateId: z.string().uuid(),
-  recipientUserIds: z.array(z.string().uuid()).min(1).max(10)
+  recipientUserIds: z.array(z.string().uuid()).min(1),
+  clientRequestId: z.string().uuid().optional()
 });
 
 export const resendEmailLogSchema = z.object({
@@ -97,6 +98,17 @@ type LoggedRecipient = {
   status?: "sent" | "failed";
   providerRequestId?: string | null;
   errorMessage?: string | null;
+};
+
+type LoggedRecipientSource = {
+  id?: string;
+  userId?: string;
+  name: string;
+  email: string;
+  phoneNumber?: string;
+  accessLink?: string;
+  redeemCode?: string | null;
+  redeemLink?: string;
 };
 
 function getEmailTemplateRecipientMode(templateName: string | null | undefined) {
@@ -303,6 +315,18 @@ async function processEmailQueue<TRecipient extends {
     subject: string;
     message: string;
   };
+  onBatchComplete?: (
+    deliveries: Array<{
+      userId: string;
+      name: string;
+      email: string;
+      subject: string;
+      ok: boolean;
+      id: string | null;
+      payload: unknown;
+      errorMessage: string | null;
+    }>
+  ) => Promise<void>;
 }) {
   const deliveries: Array<{
     userId: string;
@@ -344,6 +368,7 @@ async function processEmailQueue<TRecipient extends {
     );
 
     deliveries.push(...batchDeliveries);
+    await input.onBatchComplete?.(deliveries);
 
     if (index + 2 < input.recipients.length) {
       await sleep(3000);
@@ -369,6 +394,168 @@ function summarizeEmailLogStatus(
   }
 
   return "partial";
+}
+
+function buildLoggedRecipients(
+  recipients: LoggedRecipientSource[],
+  deliveries: Array<{
+  userId: string;
+  ok: boolean;
+  id: string | null;
+  errorMessage: string | null;
+}>
+) {
+  return recipients.map((recipient) => {
+    const recipientId = recipient.id ?? recipient.userId ?? recipient.email;
+    const delivery = deliveries.find((item) => item.userId === recipientId);
+
+    return {
+      userId: recipientId,
+      name: recipient.name,
+      email: recipient.email,
+      phoneNumber: recipient.phoneNumber ?? "",
+      accessLink: recipient.accessLink ?? "",
+      redeemCode: recipient.redeemCode ?? null,
+      redeemLink: recipient.redeemLink ?? "",
+      status: delivery ? (delivery.ok ? "sent" : "failed") : undefined,
+      providerRequestId: delivery?.id ?? null,
+      errorMessage: delivery?.errorMessage ?? null
+    };
+  });
+}
+
+async function createQueuedEmailLog(input: {
+  templateId: string | null;
+  templateName: string;
+  subject: string;
+  message: string;
+  recipients: LoggedRecipientSource[];
+  clientRequestId?: string;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("email_logs")
+    .insert({
+      template_id: input.templateId,
+      template_name: input.templateName,
+      subject: input.subject,
+      message: input.message,
+      recipients: buildLoggedRecipients(input.recipients, []),
+      recipient_count: input.recipients.length,
+      status: "queued",
+      provider_request_id: input.clientRequestId ?? null,
+      provider_response: {
+        processedCount: 0,
+        sentCount: 0,
+        failedCount: 0,
+        totalCount: input.recipients.length
+      }
+    })
+    .select(
+      "id, template_id, template_name, subject, message, recipients, recipient_count, status, provider_request_id, provider_response, created_at"
+    )
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as EmailLogRow;
+}
+
+async function updateEmailLogProgress(input: {
+  logId: string;
+  recipients: LoggedRecipientSource[];
+  deliveries: Array<{
+    userId: string;
+    ok: boolean;
+    id: string | null;
+    payload?: unknown;
+    errorMessage: string | null;
+  }>;
+  status: "queued" | "sent" | "failed" | "partial";
+  providerResponse: unknown;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const sentCount = input.deliveries.filter((delivery) => delivery.ok).length;
+  const failedCount = input.deliveries.length - sentCount;
+  const { data, error } = await supabase
+    .from("email_logs")
+    .update({
+      recipients: buildLoggedRecipients(input.recipients, input.deliveries),
+      status: input.status,
+      provider_response:
+        input.status === "queued"
+          ? {
+              processedCount: input.deliveries.length,
+              sentCount,
+              failedCount,
+              totalCount: input.recipients.length
+            }
+          : input.providerResponse
+    })
+    .eq("id", input.logId)
+    .select(
+      "id, template_id, template_name, subject, message, recipients, recipient_count, status, provider_request_id, provider_response, created_at"
+    )
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as EmailLogRow;
+}
+
+export async function getEmailLogProgressByRequestId(requestId: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("email_logs")
+    .select(
+      "id, recipient_count, status, recipients, created_at"
+    )
+    .eq("provider_request_id", requestId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  const row = (data?.[0] as Pick<EmailLogRow, "id" | "recipient_count" | "status" | "recipients" | "created_at"> | undefined) ?? null;
+
+  if (!row) {
+    return null;
+  }
+
+  const processedCount = Array.isArray(row.recipients)
+    ? row.recipients.filter((recipient) => {
+        const value = recipient as Record<string, unknown>;
+        return value.status === "sent" || value.status === "failed";
+      }).length
+    : 0;
+  const sentCount = Array.isArray(row.recipients)
+    ? row.recipients.filter((recipient) => {
+        const value = recipient as Record<string, unknown>;
+        return value.status === "sent";
+      }).length
+    : 0;
+  const failedCount = Array.isArray(row.recipients)
+    ? row.recipients.filter((recipient) => {
+        const value = recipient as Record<string, unknown>;
+        return value.status === "failed";
+      }).length
+    : 0;
+
+  return {
+    logId: row.id,
+    status: row.status,
+    processedCount,
+    sentCount,
+    failedCount,
+    totalCount: row.recipient_count,
+    createdAt: row.created_at
+  };
 }
 
 export async function listEmailTemplates() {
@@ -699,53 +886,42 @@ export async function sendEmailCampaign(input: z.infer<typeof sendEmailCampaignS
     throw new Error("One or more selected recipients are invalid, inactive, missing email, or already sent.");
   }
 
+  const queuedLog = await createQueuedEmailLog({
+    templateId: template.id,
+    templateName: template.name,
+    subject: template.subject,
+    message: template.message,
+    recipients,
+    clientRequestId: input.clientRequestId
+  });
+
   const deliveries = await processEmailQueue({
     recipients,
     buildMessage: (recipient) => ({
       subject: renderTemplateValue(template.name, template.subject, recipient),
       message: renderTemplateValue(template.name, template.message, recipient)
-    })
+    }),
+    onBatchComplete: async (completedDeliveries) => {
+      await updateEmailLogProgress({
+        logId: queuedLog.id,
+        recipients,
+        deliveries: completedDeliveries,
+        status: "queued",
+        providerResponse: completedDeliveries
+      });
+    }
   });
 
   const successCount = deliveries.filter((delivery) => delivery.ok).length;
   const status = summarizeEmailLogStatus(deliveries);
 
-  const supabase = createSupabaseAdminClient();
-  const { data: logRow, error: logError } = await supabase
-    .from("email_logs")
-    .insert({
-      template_id: template.id,
-      template_name: template.name,
-      subject: template.subject,
-      message: template.message,
-      recipients: recipients.map((recipient) => {
-        const delivery = deliveries.find((item) => item.userId === recipient.id);
-        return {
-        userId: recipient.id,
-        name: recipient.name,
-        email: recipient.email,
-        phoneNumber: recipient.phoneNumber,
-        accessLink: recipient.accessLink,
-        redeemCode: recipient.redeemCode,
-        redeemLink: recipient.redeemLink,
-        status: delivery?.ok ? "sent" : "failed",
-        providerRequestId: delivery?.id ?? null,
-        errorMessage: delivery?.errorMessage ?? null
-      };
-      }),
-      recipient_count: recipients.length,
-      status,
-      provider_request_id: null,
-      provider_response: deliveries
-    })
-    .select(
-      "id, template_id, template_name, subject, message, recipients, recipient_count, status, provider_request_id, provider_response, created_at"
-    )
-    .single();
-
-  if (logError) {
-    throw logError;
-  }
+  const logRow = await updateEmailLogProgress({
+    logId: queuedLog.id,
+    recipients,
+    deliveries,
+    status,
+    providerResponse: deliveries
+  });
 
   if (status === "failed") {
     const firstFailed = deliveries.find((delivery) => !delivery.ok);
