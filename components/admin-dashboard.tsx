@@ -145,6 +145,9 @@ type AdminDashboardProps = {
       accessLink?: string;
       redeemCode?: string | null;
       redeemLink?: string;
+      status?: "sent" | "failed";
+      providerRequestId?: string | null;
+      errorMessage?: string | null;
     }>;
     recipientCount: number;
     status: "queued" | "sent" | "failed" | "partial";
@@ -494,9 +497,21 @@ function ConnectMailSection({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const googleAccounts = mailAccounts.filter(
     (account) => account.provider === "google" && account.status !== "disabled"
   );
+  const itemsPerPage = 10;
+  const totalEmailSlots = mailAccounts.length + mailAccounts.reduce((sum, account) => sum + account.subAccounts.length, 0);
+  const totalPages = Math.max(1, Math.ceil(mailAccounts.length / itemsPerPage));
+  const paginatedAccounts = mailAccounts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, Math.max(1, Math.ceil(mailAccounts.length / itemsPerPage))));
+  }, [mailAccounts.length]);
 
   function resetSubForm() {
     setSelectedMailAccountId("");
@@ -576,6 +591,7 @@ function ConnectMailSection({
         <div>
           <h3>Connect Mail</h3>
           <p>Add inboxes and monitor mailbox status.</p>
+          <p className="micro">{totalEmailSlots} total connected email slot(s) from primary and sub email.</p>
         </div>
         <div className="button-row">
           <ConnectProviderButton provider="google" label="Connect Google" />
@@ -595,6 +611,7 @@ function ConnectMailSection({
         <table className="data-table adminlte-table">
           <thead>
             <tr>
+              <th>No</th>
               <th>Provider</th>
               <th>Inbox</th>
               <th>Status</th>
@@ -605,8 +622,9 @@ function ConnectMailSection({
           </thead>
           <tbody>
             {mailAccounts.length > 0 ? (
-              mailAccounts.map((account) => (
+              paginatedAccounts.map((account, index) => (
                 <tr key={account.id}>
+                  <td>{(currentPage - 1) * itemsPerPage + index + 1}</td>
                   <td>{providerLabel(account.provider)}</td>
                   <td>{account.emailAddress}</td>
                   <td>
@@ -643,12 +661,41 @@ function ConnectMailSection({
               ))
             ) : (
               <tr>
-                <td colSpan={6}>No inbox connected yet.</td>
+                <td colSpan={7}>No inbox connected yet.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {mailAccounts.length > 0 ? (
+        <div className="card-footer">
+          <span className="results-meta">
+            {mailAccounts.length} primary inbox | {totalEmailSlots} total email slot(s)
+          </span>
+          <div className="pagination-bar">
+            <button
+              className={cn("page-link", currentPage === 1 && "disabled")}
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              type="button"
+            >
+              Prev
+            </button>
+            <span className="page-status">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              className={cn("page-link", currentPage === totalPages && "disabled")}
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              type="button"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {isSubModalOpen ? (
         <div className="modal-backdrop" onClick={closeSubModal} role="presentation">
@@ -1524,6 +1571,8 @@ function EmailSection({
     selectedRecipientIds.includes(recipient.id)
   );
   const resendLog = logs.find((log) => log.id === resendLogId) ?? null;
+  const estimatedQueueSeconds =
+    selectedRecipientIds.length > 0 ? Math.max(0, Math.ceil(selectedRecipientIds.length / 2) - 1) * 3 : 0;
 
   useEffect(() => {
     setRecipientSearch("");
@@ -1936,6 +1985,15 @@ function EmailSection({
             />
           </div>
           <div className="recipient-meta">Selected {selectedRecipientIds.length}/10 recipient(s)</div>
+          {selectedRecipientIds.length > 0 ? (
+            <p className="micro">
+              Sending uses a queue of 2 email(s) every 3 seconds. Estimated duration: about{" "}
+              <strong>
+                {estimatedQueueSeconds > 0 ? `${estimatedQueueSeconds}-${estimatedQueueSeconds + 3} seconds` : "under 3 seconds"}
+              </strong>
+              .
+            </p>
+          ) : null}
           <div className="button-row">
             <button
               className="button secondary"
@@ -1979,6 +2037,11 @@ function EmailSection({
               <p className="success-title">{sendFeedback}</p>
             </div>
           ) : null}
+          {isSendingEmail ? (
+            <p className="micro">
+              Sending in queue. Keep this page open while the selected recipients are processed.
+            </p>
+          ) : null}
           <div className="button-row toolbar-row">
             <button
               className="button"
@@ -2021,7 +2084,9 @@ function EmailSection({
                       <div className="log-recipient-list">
                         {log.recipients.map((recipient) => (
                           <span key={`${log.id}-${recipient.userId}`}>
-                            {recipient.name} ({recipient.email})
+                            {recipient.name} ({recipient.email}){" "}
+                            [{recipient.status === "failed" ? "failed" : "sent"}]
+                            {recipient.errorMessage ? ` - ${recipient.errorMessage}` : ""}
                           </span>
                         ))}
                       </div>
@@ -2040,7 +2105,15 @@ function EmailSection({
                         {log.status}
                       </span>
                     </td>
-                    <td>{log.providerRequestId ?? "-"}</td>
+                    <td>
+                      <div className="log-recipient-list">
+                        {log.recipients.map((recipient) => (
+                          <span key={`${log.id}-${recipient.userId}-request`}>
+                            {recipient.name}: {recipient.providerRequestId ?? "-"}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td>
                       <button
                         className="button secondary"

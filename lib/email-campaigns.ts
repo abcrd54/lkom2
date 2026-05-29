@@ -53,6 +53,9 @@ type EmailLogRow = {
     accessLink?: string;
     redeemCode?: string | null;
     redeemLink?: string;
+    status?: "sent" | "failed";
+    providerRequestId?: string | null;
+    errorMessage?: string | null;
   }>;
   recipient_count: number;
   status: "queued" | "sent" | "failed" | "partial";
@@ -91,6 +94,9 @@ type LoggedRecipient = {
   accessLink: string;
   redeemCode: string | null;
   redeemLink: string;
+  status?: "sent" | "failed";
+  providerRequestId?: string | null;
+  errorMessage?: string | null;
 };
 
 function getEmailTemplateRecipientMode(templateName: string | null | undefined) {
@@ -266,6 +272,105 @@ async function sendResendEmail(input: {
   };
 }
 
+function getEmailDeliveryErrorMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    const value = payload as Record<string, unknown>;
+
+    if (typeof value.message === "string" && value.message.length > 0) {
+      return value.message;
+    }
+
+    if (typeof value.error === "string" && value.error.length > 0) {
+      return value.error;
+    }
+  }
+
+  return fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function processEmailQueue<TRecipient extends {
+  id?: string;
+  userId?: string;
+  name: string;
+  email: string;
+}>(input: {
+  recipients: TRecipient[];
+  buildMessage: (recipient: TRecipient) => {
+    subject: string;
+    message: string;
+  };
+}) {
+  const deliveries: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    subject: string;
+    ok: boolean;
+    id: string | null;
+    payload: unknown;
+    errorMessage: string | null;
+  }> = [];
+
+  for (let index = 0; index < input.recipients.length; index += 2) {
+    const batch = input.recipients.slice(index, index + 2);
+    const batchDeliveries = await Promise.all(
+      batch.map(async (recipient) => {
+        const rendered = input.buildMessage(recipient);
+        const result = await sendResendEmail({
+          to: recipient.email,
+          subject: rendered.subject,
+          message: rendered.message,
+          recipient
+        });
+
+        return {
+          userId: recipient.id ?? recipient.userId ?? recipient.email,
+          name: recipient.name,
+          email: recipient.email,
+          subject: rendered.subject,
+          ok: result.ok,
+          id: result.id,
+          payload: result.payload,
+          errorMessage:
+            result.ok
+              ? null
+              : getEmailDeliveryErrorMessage(result.payload, "Email send failed.")
+        };
+      })
+    );
+
+    deliveries.push(...batchDeliveries);
+
+    if (index + 2 < input.recipients.length) {
+      await sleep(3000);
+    }
+  }
+
+  return deliveries;
+}
+
+function summarizeEmailLogStatus(
+  deliveries: Array<{
+    ok: boolean;
+  }>
+): "queued" | "failed" | "partial" | "sent" {
+  const successCount = deliveries.filter((delivery) => delivery.ok).length;
+
+  if (successCount === deliveries.length) {
+    return "sent";
+  }
+
+  if (successCount === 0) {
+    return "failed";
+  }
+
+  return "partial";
+}
+
 export async function listEmailTemplates() {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
@@ -418,6 +523,10 @@ async function listSentEmailRecipientUserIds() {
         ? row.recipients
             .map((recipient) => {
               const value = recipient as Record<string, unknown>;
+              const status = typeof value.status === "string" ? value.status : "sent";
+              if (status !== "sent") {
+                return null;
+              }
               return typeof value.userId === "string"
                 ? value.userId
                 : typeof value.id === "string"
@@ -519,7 +628,11 @@ async function resolveRecipientsForResend(sourceRecipients: EmailLogRow["recipie
           typeof value.redeemCode === "string" || value.redeemCode === null
             ? (value.redeemCode as string | null)
             : undefined,
-        redeemLink: typeof value.redeemLink === "string" ? value.redeemLink : undefined
+        redeemLink: typeof value.redeemLink === "string" ? value.redeemLink : undefined,
+        status: value.status === "failed" ? "failed" : value.status === "sent" ? "sent" : undefined,
+        providerRequestId:
+          typeof value.providerRequestId === "string" ? value.providerRequestId : undefined,
+        errorMessage: typeof value.errorMessage === "string" ? value.errorMessage : undefined
       };
     })
     .filter((recipient) => recipient.name && recipient.email);
@@ -552,7 +665,15 @@ async function resolveRecipientsForResend(sourceRecipients: EmailLogRow["recipie
           recipient.redeemCode !== undefined
             ? recipient.redeemCode
             : (currentRecipient?.redeemCode ?? null),
-        redeemLink: recipient.redeemLink ?? currentRecipient?.redeemLink ?? ""
+        redeemLink: recipient.redeemLink ?? currentRecipient?.redeemLink ?? "",
+        status:
+          recipient.status === "failed"
+            ? "failed"
+            : recipient.status === "sent"
+              ? "sent"
+              : undefined,
+        providerRequestId: recipient.providerRequestId,
+        errorMessage: recipient.errorMessage
       } satisfies LoggedRecipient;
     })
     .filter((recipient) => recipient.accessLink && recipient.redeemLink && recipient.email);
@@ -578,35 +699,16 @@ export async function sendEmailCampaign(input: z.infer<typeof sendEmailCampaignS
     throw new Error("One or more selected recipients are invalid, inactive, missing email, or already sent.");
   }
 
-  const deliveries = await Promise.all(
-    recipients.map(async (recipient) => {
-      const renderedSubject = renderTemplateValue(template.name, template.subject, recipient);
-      const renderedMessage = renderTemplateValue(template.name, template.message, recipient);
-      const result = await sendResendEmail({
-        to: recipient.email,
-        subject: renderedSubject,
-        message: renderedMessage,
-        recipient
-      });
-
-      return {
-        userId: recipient.id,
-        email: recipient.email,
-        subject: renderedSubject,
-        ok: result.ok,
-        id: result.id,
-        payload: result.payload
-      };
+  const deliveries = await processEmailQueue({
+    recipients,
+    buildMessage: (recipient) => ({
+      subject: renderTemplateValue(template.name, template.subject, recipient),
+      message: renderTemplateValue(template.name, template.message, recipient)
     })
-  );
+  });
 
   const successCount = deliveries.filter((delivery) => delivery.ok).length;
-  const status: "queued" | "failed" | "partial" | "sent" =
-    successCount === deliveries.length
-      ? "sent"
-      : successCount === 0
-        ? "failed"
-        : "partial";
+  const status = summarizeEmailLogStatus(deliveries);
 
   const supabase = createSupabaseAdminClient();
   const { data: logRow, error: logError } = await supabase
@@ -616,19 +718,24 @@ export async function sendEmailCampaign(input: z.infer<typeof sendEmailCampaignS
       template_name: template.name,
       subject: template.subject,
       message: template.message,
-      recipients: recipients.map((recipient) => ({
+      recipients: recipients.map((recipient) => {
+        const delivery = deliveries.find((item) => item.userId === recipient.id);
+        return {
         userId: recipient.id,
         name: recipient.name,
         email: recipient.email,
         phoneNumber: recipient.phoneNumber,
         accessLink: recipient.accessLink,
         redeemCode: recipient.redeemCode,
-        redeemLink: recipient.redeemLink
-      })),
+        redeemLink: recipient.redeemLink,
+        status: delivery?.ok ? "sent" : "failed",
+        providerRequestId: delivery?.id ?? null,
+        errorMessage: delivery?.errorMessage ?? null
+      };
+      }),
       recipient_count: recipients.length,
       status,
-      provider_request_id:
-        deliveries.length === 1 ? (deliveries[0]?.id ?? null) : `${successCount}/${deliveries.length}`,
+      provider_request_id: null,
       provider_response: deliveries
     })
     .select(
@@ -642,10 +749,7 @@ export async function sendEmailCampaign(input: z.infer<typeof sendEmailCampaignS
 
   if (status === "failed") {
     const firstFailed = deliveries.find((delivery) => !delivery.ok);
-    const errorMessage =
-      typeof firstFailed?.payload?.message === "string"
-        ? firstFailed.payload.message
-        : "Email send failed.";
+    const errorMessage = getEmailDeliveryErrorMessage(firstFailed?.payload, "Email send failed.");
     throw new Error(errorMessage);
   }
 
@@ -679,35 +783,16 @@ export async function resendEmailLog(input: z.infer<typeof resendEmailLogSchema>
     throw new Error("Selected email log does not contain resendable recipients.");
   }
 
-  const deliveries = await Promise.all(
-    recipients.map(async (recipient) => {
-      const renderedSubject = renderTemplateValue(sourceLog.template_name, sourceLog.subject, recipient);
-      const renderedMessage = renderTemplateValue(sourceLog.template_name, sourceLog.message, recipient);
-      const result = await sendResendEmail({
-        to: recipient.email,
-        subject: renderedSubject,
-        message: renderedMessage,
-        recipient
-      });
-
-      return {
-        userId: recipient.userId,
-        email: recipient.email,
-        subject: renderedSubject,
-        ok: result.ok,
-        id: result.id,
-        payload: result.payload
-      };
+  const deliveries = await processEmailQueue({
+    recipients,
+    buildMessage: (recipient) => ({
+      subject: renderTemplateValue(sourceLog.template_name, sourceLog.subject, recipient),
+      message: renderTemplateValue(sourceLog.template_name, sourceLog.message, recipient)
     })
-  );
+  });
 
   const successCount = deliveries.filter((delivery) => delivery.ok).length;
-  const status: "queued" | "failed" | "partial" | "sent" =
-    successCount === deliveries.length
-      ? "sent"
-      : successCount === 0
-        ? "failed"
-        : "partial";
+  const status = summarizeEmailLogStatus(deliveries);
 
   const supabase = createSupabaseAdminClient();
   const { data: logRow, error: logError } = await supabase
@@ -717,11 +802,18 @@ export async function resendEmailLog(input: z.infer<typeof resendEmailLogSchema>
       template_name: sourceLog.template_name,
       subject: sourceLog.subject,
       message: sourceLog.message,
-      recipients,
+      recipients: recipients.map((recipient) => {
+        const delivery = deliveries.find((item) => item.userId === recipient.userId);
+        return {
+          ...recipient,
+          status: delivery?.ok ? "sent" : "failed",
+          providerRequestId: delivery?.id ?? null,
+          errorMessage: delivery?.errorMessage ?? null
+        };
+      }),
       recipient_count: recipients.length,
       status,
-      provider_request_id:
-        deliveries.length === 1 ? (deliveries[0]?.id ?? null) : `${successCount}/${deliveries.length}`,
+      provider_request_id: null,
       provider_response: deliveries
     })
     .select(
@@ -735,10 +827,7 @@ export async function resendEmailLog(input: z.infer<typeof resendEmailLogSchema>
 
   if (status === "failed") {
     const firstFailed = deliveries.find((delivery) => !delivery.ok);
-    const errorMessage =
-      typeof firstFailed?.payload?.message === "string"
-        ? firstFailed.payload.message
-        : "Email resend failed.";
+    const errorMessage = getEmailDeliveryErrorMessage(firstFailed?.payload, "Email resend failed.");
     throw new Error(errorMessage);
   }
 
