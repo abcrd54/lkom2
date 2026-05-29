@@ -533,7 +533,7 @@ function ConnectMailSection({
           mailAccountId: selectedMailAccountId,
           label: subLabel,
           displayEmail: subDisplayEmail,
-          maxUsers: 3
+          maxUsers: 4
         })
       });
 
@@ -661,7 +661,7 @@ function ConnectMailSection({
             <div className="modal-head">
               <div>
                 <h3>Add Sub-Gmail</h3>
-                <p>Create one logical Gmail slot with its own 3-user capacity.</p>
+                <p>Create one logical Gmail slot with its own 4-user capacity.</p>
               </div>
               <button className="modal-close" onClick={closeSubModal} type="button">
                 Close

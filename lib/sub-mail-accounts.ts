@@ -7,7 +7,7 @@ export const createSubMailAccountSchema = z.object({
   mailAccountId: z.string().uuid(),
   label: z.string().trim().min(2).max(120),
   displayEmail: z.string().trim().email(),
-  maxUsers: z.coerce.number().int().min(1).max(100).default(3)
+  maxUsers: z.coerce.number().int().min(1).max(100).default(4)
 });
 
 type SubMailAccountRow = {
@@ -196,7 +196,7 @@ export async function resolveActiveInboxSlotByEmail(displayEmail: string) {
         mail_account_id: mailAccount.id,
         label: "Primary",
         display_email: normalizedDisplayEmail,
-        max_users: 3
+        max_users: 4
       },
       {
         onConflict: "mail_account_id,display_email"

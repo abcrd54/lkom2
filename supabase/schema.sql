@@ -17,7 +17,7 @@ create table if not exists sub_mail_accounts (
   mail_account_id uuid not null references mail_accounts(id) on delete cascade,
   label text not null,
   display_email text not null,
-  max_users integer not null default 3 check (max_users >= 1 and max_users <= 100),
+  max_users integer not null default 4 check (max_users >= 1 and max_users <= 100),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (mail_account_id, display_email)
@@ -132,7 +132,7 @@ begin
 end $$;
 
 insert into sub_mail_accounts (mail_account_id, label, display_email, max_users)
-select ma.id, 'Primary', ma.email_address, 3
+select ma.id, 'Primary', ma.email_address, 4
 from mail_accounts ma
 where not exists (
   select 1
