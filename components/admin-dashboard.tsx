@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import { ConnectProviderButton } from "@/components/connect-provider-buttons";
+import { BlastEmailSection } from "@/components/blast-email-section";
 import { LogoutButton } from "@/components/logout-button";
 import { RedeemSection } from "@/components/redeem-section";
 import { getDashboardPath, type DashboardTab } from "@/lib/admin-dashboard";
@@ -210,6 +211,7 @@ const NAV_ITEMS: { id: DashboardTab; label: string }[] = [
   { id: "otp-inbox", label: "OTP Inbox" },
   { id: "redeem", label: "Redeem" },
   { id: "email", label: "Kirim Email" },
+  { id: "blast-email", label: "Blast Email" },
   { id: "whatsapp", label: "Kirim WhatsApp" }
 ];
 
@@ -3236,6 +3238,8 @@ export function AdminDashboard({
             recipients={emailRecipients}
           />
         ) : null}
+
+        {activeTab === "blast-email" ? <BlastEmailSection fullWidth /> : null}
 
         {activeTab === "whatsapp" ? (
           <WhatsappSection

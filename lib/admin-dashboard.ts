@@ -5,6 +5,7 @@ export type DashboardTab =
   | "otp-inbox"
   | "redeem"
   | "email"
+  | "blast-email"
   | "whatsapp";
 
 export function getDashboardPath(tab: DashboardTab) {
@@ -21,6 +22,8 @@ export function getDashboardPath(tab: DashboardTab) {
       return "/redeem";
     case "email":
       return "/email";
+    case "blast-email":
+      return "/blast-email";
     case "whatsapp":
       return "/whatsapp";
   }
